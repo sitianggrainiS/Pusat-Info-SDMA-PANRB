@@ -1,0 +1,8 @@
+{
+  "name": "Remix Remix Pusat Informasi Kebijakan SDM Aparatur",
+  "description": "Platform edukasi kebijakan SDM Aparatur yang menyajikan informasi secara ringkas, visual, dan mudah dipahami, terhubung dengan konten Instagram dan regulasi resmi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
