@@ -19,41 +19,64 @@ interface AdminLoginPageProps {
 }
 
 export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
-  const { loginAsAdmin, navigateTo } = usePolicy();
+  const { loginAsAdmin, loginWithGoogleFirebase, navigateTo } = usePolicy();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [isEmailLoading, setIsEmailLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleGoogleSignIn = async () => {
+    setEmailError(null);
+    setPasswordError(null);
+    setGoogleAuthError(null);
+    setIsGoogleLoading(true);
+    try {
+      const res = await loginWithGoogleFirebase();
+      if (!res.success) {
+        setGoogleAuthError(res.error || 'Autentikasi Google gagal.');
+        return;
+      }
+      navigateTo({ name: 'admin-dashboard' });
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setEmailError(null);
     setPasswordError(null);
+    setGoogleAuthError(null);
 
     if (!email.trim()) {
-      setEmailError('Email Anda salah');
+      setEmailError('Email wajib diisi.');
       return;
     }
 
     if (!password) {
-      setPasswordError('Password Anda salah');
+      setPasswordError('Password wajib diisi.');
       return;
     }
 
-    const result = loginAsAdmin(email.trim(), password);
-    if (!result.success) {
-      if (result.errorType === 'email') {
-        setEmailError('Email Anda salah');
-      } else if (result.errorType === 'password') {
-        setPasswordError('Password Anda salah');
-      } else {
-        setEmailError('Email Anda salah');
+    setIsEmailLoading(true);
+    try {
+      const result = await loginAsAdmin(email.trim(), password);
+      if (!result.success) {
+        if (result.errorType === 'email') {
+          setEmailError(result.error || 'Email tidak terotorisasi.');
+        } else {
+          setPasswordError(result.error || 'Autentikasi gagal.');
+        }
+        return;
       }
-      return;
+      navigateTo({ name: 'admin-dashboard' });
+    } finally {
+      setIsEmailLoading(false);
     }
-
-    navigateTo({ name: 'admin-dashboard' });
   };
 
   return (
@@ -95,7 +118,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
             Portal Tim Konten SDM Aparatur
           </h2>
           <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed">
-            Akses Terbatas: Hanya email dan password yang sudah terdaftar resmi yang dapat masuk ke portal admin.
+            Akses Terbatas: Hanya akun resmi yang terotorisasi yang dapat masuk dan mengelola database Cloud Firestore.
           </p>
         </div>
 
@@ -106,6 +129,57 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
             <p className="leading-relaxed">{notice}</p>
           </div>
         )}
+
+        {/* Primary Firebase Google Authentication */}
+        <div className="space-y-2.5">
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.985 }}
+            type="button"
+            disabled={isGoogleLoading}
+            onClick={handleGoogleSignIn}
+            className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-slate-800 text-xs sm:text-sm font-bold rounded-xl border border-slate-200 shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2.5 disabled:opacity-60"
+          >
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                fill="#4285F4"
+                d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"
+              />
+              <path
+                fill="#EA4335"
+                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"
+              />
+            </svg>
+            <span>
+              {isGoogleLoading
+                ? 'Menghubungkan ke Firebase Auth...'
+                : 'Masuk dengan Google (Firebase Auth)'}
+            </span>
+          </motion.button>
+
+          {googleAuthError && (
+            <p className="text-xs font-semibold text-red-600 flex items-start gap-1.5">
+              <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+              <span>{googleAuthError}</span>
+            </p>
+          )}
+
+          <div className="relative flex items-center py-1">
+            <div className="flex-grow border-t border-slate-200/80" />
+            <span className="shrink-0 mx-3 text-[11px] font-medium text-slate-400">
+              atau akun kedinasan
+            </span>
+            <div className="flex-grow border-t border-slate-200/80" />
+          </div>
+        </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
@@ -195,10 +269,11 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
             whileHover={{ y: -1 }}
             whileTap={{ scale: 0.985 }}
             type="submit"
-            className="w-full py-3 px-4 bg-[#07529A] hover:bg-[#053d73] text-white text-xs sm:text-sm font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(7,82,154,0.45)] transition-colors cursor-pointer flex items-center justify-center gap-2 mt-2"
+            disabled={isEmailLoading || isGoogleLoading}
+            className="w-full py-3 px-4 bg-[#07529A] hover:bg-[#053d73] text-white text-xs sm:text-sm font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(7,82,154,0.45)] transition-colors cursor-pointer flex items-center justify-center gap-2 mt-2 disabled:opacity-60"
           >
             <KeyRound className="w-4 h-4 text-[#FFD84D]" />
-            <span>Masuk ke Portal Admin</span>
+            <span>{isEmailLoading ? 'Memverifikasi di Firebase Auth...' : 'Masuk ke Portal Admin'}</span>
             <ArrowRight className="w-4 h-4" />
           </motion.button>
         </form>
@@ -206,7 +281,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
         {/* Security Footer Note */}
         <div className="pt-4 border-t border-slate-100 text-center">
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Sistem Keamanan Kedinasan (RBAC) aktif. Akses terbatas hanya untuk personil resmi Kementerian PANRB.
+            Sistem Keamanan Kedinasan (RBAC & Firebase Security Rules) aktif. Akses terbatas hanya untuk personil resmi Kementerian PANRB.
           </p>
         </div>
       </motion.div>

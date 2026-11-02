@@ -68,7 +68,8 @@ export function validateMenpanArticleUrl(rawUrl: string): {
 }
 
 /**
- * Validates a thumbnail string (uploaded data:image base64 or external HTTPS/HTTP image URL).
+ * Validates a thumbnail URL metadata string (external HTTPS/HTTP image URL or static asset path).
+ * Inline binary data:/blob: strings are rejected so Firestore only stores permanent URL metadata.
  */
 export function validateNewsThumbnail(rawThumbnail: string): {
   isValid: boolean;
@@ -80,12 +81,25 @@ export function validateNewsThumbnail(rawThumbnail: string): {
     return {
       isValid: false,
       cleanThumbnail: '',
-      error: 'Gambar/thumbnail berita wajib diunggah atau diisi melalui URL gambar.',
+      error: 'URL gambar/thumbnail berita wajib diisi (contoh: https://...).',
     };
   }
 
-  if (trimmed.startsWith('data:image/')) {
-    return { isValid: true, cleanThumbnail: trimmed };
+  if (trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+    return {
+      isValid: false,
+      cleanThumbnail: '',
+      error:
+        'Penyimpanan file gambar langsung belum tersedia karena Firebase Storage dinonaktifkan (VITE_ENABLE_FIREBASE_STORAGE=false). Masukkan tautan URL gambar eksternal (https://...).',
+    };
+  }
+
+  if (trimmed.length > 2048) {
+    return {
+      isValid: false,
+      cleanThumbnail: '',
+      error: 'Panjang URL gambar melebihi batas maksimum metadata (2048 karakter).',
+    };
   }
 
   if (trimmed.startsWith('/')) {
@@ -106,7 +120,7 @@ export function validateNewsThumbnail(rawThumbnail: string): {
     return {
       isValid: false,
       cleanThumbnail: '',
-      error: 'URL gambar tidak valid. Unggah file gambar dari perangkat atau masukkan URL gambar yang benar.',
+      error: 'Format URL gambar tidak valid. Masukkan tautan URL gambar lengkap (https://...).',
     };
   }
 }

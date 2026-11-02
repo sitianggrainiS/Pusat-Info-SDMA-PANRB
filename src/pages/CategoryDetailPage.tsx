@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { usePolicy } from '../context/PolicyContext';
 import { CategoryIcon } from '../components/common/CategoryIcon';
-import { InstagramEmbed } from '../components/common/InstagramEmbed';
+import { InstagramEmbed, resolvePolicyReleaseDate } from '../components/common/InstagramEmbed';
 import {
   FeedLayoutSwitcher,
   FeedLayoutOption,
@@ -140,7 +140,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({ slug }) 
                           {category.name}
                         </span>
                         <span>·</span>
-                        <span className="shrink-0">{policy.publicationDate}</span>
+                        <span className="shrink-0">{resolvePolicyReleaseDate(policy)}</span>
                       </div>
                       <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">
                         {policy.title}

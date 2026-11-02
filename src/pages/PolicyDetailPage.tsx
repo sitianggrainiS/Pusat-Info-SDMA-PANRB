@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { usePolicy } from '../context/PolicyContext';
-import { InstagramEmbed } from '../components/common/InstagramEmbed';
+import { InstagramEmbed, resolvePolicyReleaseDate } from '../components/common/InstagramEmbed';
 import { CategoryIcon } from '../components/common/CategoryIcon';
 import {
   ArrowLeft,
@@ -154,7 +154,7 @@ export const PolicyDetailPage: React.FC<PolicyDetailPageProps> = ({ slug }) => {
             <span aria-hidden="true">·</span>
             <span className="flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <span>Dipublikasikan {policy.publicationDate}</span>
+              <span>Dipublikasikan {resolvePolicyReleaseDate(policy)}</span>
             </span>
             <span aria-hidden="true">·</span>
             <span className="text-slate-600 font-medium inline-flex items-center gap-1">
@@ -275,7 +275,7 @@ export const PolicyDetailPage: React.FC<PolicyDetailPageProps> = ({ slug }) => {
                   </div>
                   <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200/70">
                     <span className="text-slate-500 font-medium">Tanggal Rilis:</span>
-                    <span className="font-semibold text-slate-700">{policy.publicationDate}</span>
+                    <span className="font-semibold text-slate-700">{resolvePolicyReleaseDate(policy)}</span>
                   </div>
                 </div>
               </div>

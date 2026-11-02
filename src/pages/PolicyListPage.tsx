@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { usePolicy } from '../context/PolicyContext';
 import { Policy } from '../types';
-import { InstagramEmbed } from '../components/common/InstagramEmbed';
+import { InstagramEmbed, resolvePolicyReleaseDate } from '../components/common/InstagramEmbed';
 import {
   FeedLayoutSwitcher,
   FeedLayoutOption,
@@ -128,7 +128,9 @@ function parseDateString(raw?: string): Date | null {
 }
 
 function getPolicyDate(policy: Policy): Date | null {
+  const resolved = resolvePolicyReleaseDate(policy);
   return (
+    parseDateString(resolved !== '-' ? resolved : undefined) ||
     parseDateString(policy.instagramDate) ||
     parseDateString(policy.publicationDate) ||
     parseDateString(policy.createdAt) ||
@@ -651,7 +653,7 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
                           {cluster?.name || 'SDM Aparatur'}
                         </span>
                         <span>·</span>
-                        <span className="shrink-0">{policy.publicationDate}</span>
+                        <span className="shrink-0">{resolvePolicyReleaseDate(policy)}</span>
                       </div>
                       <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">
                         {policy.title}

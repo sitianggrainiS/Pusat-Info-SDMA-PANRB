@@ -11,46 +11,19 @@ interface InstagramEmbedProps {
   hideHeader?: boolean;
 }
 
-/**
- * Extracts and cleans Instagram post / reel / carousel URL.
- */
-export function extractInstagramInfo(rawUrl: string, captioned: boolean = true) {
-  if (!rawUrl || typeof rawUrl !== 'string') {
-    return { isValid: false, cleanUrl: '', shortcode: '', type: 'post' as const, embedUrl: '' };
-  }
+import {
+  extractInstagramInfo,
+  extractInstagramDateFromShortcode,
+  extractInstagramDateFromUrl,
+  resolvePolicyReleaseDate,
+} from '../../utils/instagramUtils';
 
-  const trimmed = rawUrl.trim();
-  // Regex to match posts, reels, or tv: /p/:code, /reel/:code, /tv/:code
-  const regex = /instagram\.com\/(?:[^\/]+\/)?(p|reel|tv)\/([a-zA-Z0-9_-]+)/i;
-  const match = trimmed.match(regex);
-  const embedSuffix = captioned ? 'embed/captioned/' : 'embed/';
-
-  if (match) {
-    const mediaType = match[1].toLowerCase() === 'reel' ? ('reel' as const) : ('post' as const);
-    const shortcode = match[2];
-    const cleanUrl = `https://www.instagram.com/${match[1]}/${shortcode}/`;
-    return {
-      isValid: true,
-      cleanUrl,
-      shortcode,
-      type: mediaType,
-      embedUrl: `https://www.instagram.com/${match[1]}/${shortcode}/${embedSuffix}`,
-    };
-  }
-
-  if (trimmed.includes('instagram.com')) {
-    const clean = trimmed.split('?')[0].replace(/\/+$/, '') + '/';
-    return {
-      isValid: true,
-      cleanUrl: clean,
-      shortcode: '',
-      type: 'post' as const,
-      embedUrl: `${clean}${embedSuffix}`,
-    };
-  }
-
-  return { isValid: false, cleanUrl: trimmed, shortcode: '', type: 'post' as const, embedUrl: '' };
-}
+export {
+  extractInstagramInfo,
+  extractInstagramDateFromShortcode,
+  extractInstagramDateFromUrl,
+  resolvePolicyReleaseDate,
+};
 
 export const InstagramEmbed: React.FC<InstagramEmbedProps> = ({
   url,

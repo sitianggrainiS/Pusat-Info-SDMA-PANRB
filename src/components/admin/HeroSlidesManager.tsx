@@ -37,7 +37,7 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
   onCloseExternalCreateModal,
   onShowToast,
 }) => {
-  const { heroSlides, saveHeroSlides, resetHeroSlides } = usePolicy();
+  const { heroSlides, isStorageEnabled, saveHeroSlides, resetHeroSlides } = usePolicy();
 
   // Always work with 3 normalized slots (Slot 1, Slot 2, Slot 3)
   const slots = React.useMemo(() => normalizeHeroSlides(heroSlides), [heroSlides]);
@@ -116,15 +116,19 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
     try {
       setIsUploading(true);
       setFormError(null);
-      const compressed = await compressImageFile(file, 1400, 0.86);
-      setFormImageUrl(compressed);
+      const uploadedUrl = await compressImageFile(file, 1400, 0.86, 'hero-slides');
+      setFormImageUrl(uploadedUrl);
       if (!formTitle.trim()) {
         const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
         setFormTitle(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
       }
     } catch (err) {
-      console.error('Failed to compress slide image:', err);
-      setFormError('Gagal memproses file gambar. Silakan coba gambar lain.');
+      console.error('Failed to upload slide image:', err);
+      setFormError(
+        err instanceof Error
+          ? err.message
+          : 'Gagal memproses file gambar. Gunakan URL gambar eksternal (https://...).'
+      );
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -142,17 +146,23 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
       formTitle.trim() || `Visual Kebijakan SDM Aparatur #${editingSlotIndex + 1}`;
 
     if (!cleanImg) {
-      setFormError('Silakan unggah foto dari perangkat atau masukkan URL gambar.');
+      setFormError('Silakan masukkan URL gambar (https://...) atau pilih gambar default.');
+      return;
+    }
+
+    if (cleanImg.startsWith('data:') || cleanImg.startsWith('blob:')) {
+      setFormError(
+        'Penyimpanan file gambar langsung belum tersedia karena Firebase Storage dinonaktifkan (VITE_ENABLE_FIREBASE_STORAGE=false). Gunakan URL gambar eksternal (https://...).'
+      );
       return;
     }
 
     if (
-      !cleanImg.startsWith('data:image/') &&
       !cleanImg.startsWith('/') &&
       !cleanImg.startsWith('https://') &&
       !cleanImg.startsWith('http://')
     ) {
-      setFormError('Format URL gambar tidak valid. Gunakan URL https:// atau unggah file gambar.');
+      setFormError('Format URL gambar tidak valid. Gunakan URL https://...');
       return;
     }
 
@@ -687,10 +697,14 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
                   </div>
                   <div>
                     <span className="font-bold text-slate-900 block text-xs">
-                      Unggah Foto / Gambar dari Perangkat
+                      {isStorageEnabled
+                        ? 'Unggah Foto / Gambar dari Perangkat'
+                        : 'Unggah File Perangkat (Nonaktif pada Spark Plan)'}
                     </span>
                     <span className="text-[11px] text-slate-500">
-                      Mendukung JPG, PNG, WEBP (rasio ideal 4:3 atau lanskap)
+                      {isStorageEnabled
+                        ? 'Mendukung JPG, PNG, WEBP (rasio ideal 4:3 atau lanskap)'
+                        : 'Firebase Storage nonaktif (VITE_ENABLE_FIREBASE_STORAGE=false). Gunakan kolom URL Gambar di bawah.'}
                     </span>
                   </div>
                 </div>

@@ -28,6 +28,7 @@ export const AdminAIAssistant: React.FC = () => {
   const [disclaimer, setDisclaimer] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
 
   // File upload simulation/handling
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -144,30 +145,42 @@ export const AdminAIAssistant: React.FC = () => {
     }
   };
 
-  const handleUseDraftInEditor = () => {
+  const handleUseDraftInEditor = async () => {
     if (!analysisResult) return;
 
-    // Create a new policy draft with AI assistance flag
-    const newPolicy = createPolicy({
-      title: documentTitle || 'Kebijakan Hasil Ekstraksi AI',
-      categoryId: selectedCategoryId,
-      summary: analysisResult.summary,
-      contextExplanation: analysisResult.suggestedPublicExplanation,
-      conceptA: {
-        title: 'Konsep Pokok Dokumen',
-        description: analysisResult.definition,
-        keyPoints: analysisResult.keyPoints,
-      },
-      requirements: analysisResult.requirements,
-      processSteps: analysisResult.processSteps,
-      faqs: analysisResult.faqs,
-      status: 'draft', // NEVER AUTO-PUBLISH PER RULE!
-      aiAssisted: true,
-      thumbnail: '/src/assets/images/infographic_naik_pangkat_1790755802597.jpg',
-      instagramDate: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
-    });
+    try {
+      setIsSavingDraft(true);
+      setErrorMsg(null);
+      // Create a new policy draft with AI assistance flag in Cloud Firestore
+      const newPolicy = await createPolicy({
+        title: documentTitle || 'Kebijakan Hasil Ekstraksi AI',
+        categoryId: selectedCategoryId,
+        summary: analysisResult.summary,
+        contextExplanation: analysisResult.suggestedPublicExplanation,
+        conceptA: {
+          title: 'Konsep Pokok Dokumen',
+          description: analysisResult.definition,
+          keyPoints: analysisResult.keyPoints,
+        },
+        requirements: analysisResult.requirements,
+        processSteps: analysisResult.processSteps,
+        faqs: analysisResult.faqs,
+        status: 'draft', // NEVER AUTO-PUBLISH PER RULE!
+        aiAssisted: true,
+        thumbnail: '/src/assets/images/infographic_naik_pangkat_1790755802597.jpg',
+        instagramDate: new Date().toLocaleDateString('id-ID', {
+          day: 'numeric',
+          month: 'long',
+          year: 'numeric',
+        }),
+      });
 
-    navigateTo({ name: 'admin-editor', policyId: newPolicy.id });
+      navigateTo({ name: 'admin-editor', policyId: newPolicy.id });
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Gagal menyimpan draf kebijakan ke Cloud Firestore.');
+    } finally {
+      setIsSavingDraft(false);
+    }
   };
 
   return (
@@ -338,9 +351,10 @@ export const AdminAIAssistant: React.FC = () => {
               </h3>
               <button
                 onClick={handleUseDraftInEditor}
-                className="px-5 py-2.5 bg-[#FFD84D] hover:bg-[#ffe066] text-[#07529A] font-bold text-xs rounded-xl shadow-xs transition-all hover:scale-102 cursor-pointer flex items-center gap-1.5"
+                disabled={isSavingDraft}
+                className="px-5 py-2.5 bg-[#FFD84D] hover:bg-[#ffe066] disabled:opacity-60 text-[#07529A] font-bold text-xs rounded-xl shadow-xs transition-all hover:scale-102 cursor-pointer flex items-center gap-1.5"
               >
-                <span>Gunakan sebagai Draf Konten</span>
+                <span>{isSavingDraft ? 'Menyimpan ke Firestore...' : 'Gunakan sebagai Draf Konten'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -442,10 +456,11 @@ export const AdminAIAssistant: React.FC = () => {
               </span>
               <button
                 onClick={handleUseDraftInEditor}
-                className="w-full sm:w-auto px-6 py-3 bg-[#07529A] hover:bg-[#053d73] text-white font-bold text-xs rounded-xl shadow-xs transition-all hover:scale-102 cursor-pointer flex items-center justify-center gap-2"
+                disabled={isSavingDraft}
+                className="w-full sm:w-auto px-6 py-3 bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 text-white font-bold text-xs rounded-xl shadow-xs transition-all hover:scale-102 cursor-pointer flex items-center justify-center gap-2"
               >
                 <Sparkles className="w-4 h-4 text-[#FFD84D]" />
-                <span>Jadikan Draf Konten Baru & Buka Editor</span>
+                <span>{isSavingDraft ? 'Menyimpan ke Firestore...' : 'Jadikan Draf Konten Baru & Buka Editor'}</span>
               </button>
             </div>
           </div>

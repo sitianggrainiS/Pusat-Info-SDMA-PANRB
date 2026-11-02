@@ -16,8 +16,13 @@ import {
   Menu,
   Images,
   Building2,
+  ShieldCheck,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { FirestoreAuditModal } from './FirestoreAuditModal';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -38,9 +43,25 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
   children,
   activeNav,
 }) => {
-  const { adminUser, logoutAdmin, navigateTo, resetToDemoData } = usePolicy();
+  const {
+    adminUser,
+    isFirebaseAuthConnected,
+    loginWithGoogleFirebase,
+    isDataStale,
+    syncStatusMessage,
+    isRetryingFirestore,
+    retryFirestoreConnection,
+    lastFirestoreError,
+    clearFirestoreError,
+    logoutAdmin,
+    navigateTo,
+    resetToDemoData,
+  } = usePolicy();
   const [showResetModal, setShowResetModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [showAuditModal, setShowAuditModal] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [syncNotice, setSyncNotice] = useState<{ ok: boolean; text: string } | null>(null);
 
   const navLinks = [
     {
@@ -163,6 +184,19 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
         </button>
 
+        {/* Audit & Safe Read/Write Test for Cloud Firestore */}
+        <button
+          type="button"
+          onClick={() => {
+            setMobileSidebarOpen(false);
+            setShowAuditModal(true);
+          }}
+          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:text-emerald-300 text-[11px] transition-colors cursor-pointer rounded-lg hover:bg-slate-800/60"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
+          <span>Audit & Uji Koneksi Firestore</span>
+        </button>
+
         {/* Reset demo data */}
         <button
           type="button"
@@ -271,6 +305,99 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
+        {!isFirebaseAuthConnected && (
+          <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900">
+            <span>
+              Untuk menyimpan perubahan secara permanen ke Cloud Firestore (<strong>sdmaapp</strong>), hubungkan sesi Google Admin terverifikasi Anda.
+            </span>
+            <button
+              type="button"
+              onClick={async () => {
+                const res = await loginWithGoogleFirebase();
+                if (!res.success && res.error) {
+                  setSyncNotice({ ok: false, text: res.error });
+                } else if (res.success) {
+                  setSyncNotice({
+                    ok: true,
+                    text: 'Sesi Firebase Auth terhubung. Seluruh perubahan kini tersimpan permanen di Cloud Firestore.',
+                  });
+                }
+              }}
+              className="px-3 py-1.5 rounded-lg bg-[#07529A] hover:bg-[#053d73] text-white font-bold text-[11px] transition-colors cursor-pointer shrink-0"
+            >
+              Hubungkan Google (Firebase Auth)
+            </button>
+          </div>
+        )}
+
+        {isDataStale && syncStatusMessage && (
+          <div className="px-4 sm:px-6 lg:px-8 py-2.5 border-b bg-amber-50 border-amber-200 text-amber-950 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+              <span>{syncStatusMessage}</span>
+            </div>
+            <button
+              type="button"
+              disabled={isRetryingFirestore}
+              onClick={async () => {
+                const ok = await retryFirestoreConnection();
+                if (ok) {
+                  setSyncNotice({
+                    ok: true,
+                    text: 'Koneksi Cloud Firestore berhasil dipulihkan dan data telah diperbarui dari server.',
+                  });
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 font-bold text-[11px] transition-colors cursor-pointer disabled:opacity-60 shrink-0"
+            >
+              <RefreshCw className={`w-3 h-3 ${isRetryingFirestore ? 'animate-spin' : ''}`} />
+              <span>{isRetryingFirestore ? 'Menghubungkan...' : 'Coba Hubungkan Ulang'}</span>
+            </button>
+          </div>
+        )}
+
+        {lastFirestoreError && (
+          <div className="px-4 sm:px-6 lg:px-8 py-2.5 border-b bg-rose-50 border-rose-200 text-rose-900 flex items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
+              <span>{lastFirestoreError}</span>
+            </div>
+            <button
+              type="button"
+              onClick={clearFirestoreError}
+              className="text-rose-600 hover:text-rose-900 p-1 rounded cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {syncNotice && (
+          <div
+            className={`px-4 sm:px-6 lg:px-8 py-2.5 border-b flex items-center justify-between gap-3 text-xs ${
+              syncNotice.ok
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                : 'bg-rose-50 border-rose-200 text-rose-900'
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <CheckCircle2
+                className={`w-4 h-4 shrink-0 ${
+                  syncNotice.ok ? 'text-emerald-600' : 'text-rose-600'
+                }`}
+              />
+              <span>{syncNotice.text}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSyncNotice(null)}
+              className="text-slate-500 hover:text-slate-800 p-1 rounded cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
         {/* Content Body */}
         <motion.div
           key={activeNav}
@@ -330,19 +457,41 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    resetToDemoData();
-                    setShowResetModal(false);
+                  disabled={isResetting}
+                  onClick={async () => {
+                    setIsResetting(true);
+                    try {
+                      await resetToDemoData();
+                      setShowResetModal(false);
+                      setSyncNotice({
+                        ok: true,
+                        text: 'Data referensi standar berhasil dipulihkan dan disimpan ke Cloud Firestore.',
+                      });
+                    } catch (err: any) {
+                      setShowResetModal(false);
+                      setSyncNotice({
+                        ok: false,
+                        text: err?.message || 'Gagal mereset data ke Cloud Firestore.',
+                      });
+                    } finally {
+                      setIsResetting(false);
+                    }
                   }}
-                  className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-xs transition-colors cursor-pointer"
+                  className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
-                  Ya, Reset Data
+                  {isResetting ? 'Menyimpan...' : 'Ya, Reset Data'}
                 </button>
               </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Firestore Connection Audit & Safe Read/Write Test Modal */}
+      <FirestoreAuditModal
+        isOpen={showAuditModal}
+        onClose={() => setShowAuditModal(false)}
+      />
     </div>
   );
 };

@@ -16,9 +16,11 @@ import {
   Image as ImageIcon,
   FileText,
   Briefcase,
+  Link as LinkIcon,
 } from 'lucide-react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { usePolicy } from '../../context/PolicyContext';
+import { STORAGE_DISABLED_NOTICE } from '../../lib/storageService';
 import { AboutPageContent, AboutUnitWork } from '../../types';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -49,6 +51,7 @@ export const AdminAboutManager: React.FC = () => {
     aboutPage,
     isAboutPageLoading,
     aboutPageError,
+    isStorageEnabled,
     refreshAboutPage,
     uploadAboutProfileImage,
     saveAboutPage,
@@ -114,6 +117,11 @@ export const AdminAboutManager: React.FC = () => {
 
   const validateAndStageFile = (file: File) => {
     setErrorMessage(null);
+    if (!isStorageEnabled) {
+      setErrorMessage(STORAGE_DISABLED_NOTICE);
+      return;
+    }
+
     const lowerName = file.name.toLowerCase();
     const hasValidExt = ALLOWED_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
     const hasValidMime = ALLOWED_MIME_TYPES.includes(file.type.toLowerCase());
@@ -232,14 +240,18 @@ export const AdminAboutManager: React.FC = () => {
 
     try {
       setIsSaving(true);
-      let finalImageUrl = aboutPage.profileImageUrl;
+      let finalImageUrl = formState.profileImageUrl.trim();
 
-      // 1. If admin staged a new image file, upload binary file to persistent backend storage first
+      if (finalImageUrl.startsWith('data:') || finalImageUrl.startsWith('blob:')) {
+        throw new Error(STORAGE_DISABLED_NOTICE);
+      }
+
+      // 1. If admin staged a new image file (only when Firebase Storage is enabled), upload first
       if (pendingFile) {
         finalImageUrl = await uploadAboutProfileImage(pendingFile);
       }
 
-      // 2. Persist full Halaman Tentang content + permanent image URL reference
+      // 2. Persist full Halaman Tentang content + URL metadata to Cloud Firestore
       const payload: AboutPageContent = {
         ...formState,
         profileImageUrl: finalImageUrl,
@@ -304,7 +316,7 @@ export const AdminAboutManager: React.FC = () => {
   };
 
   const hasUnsavedAnything = hasUnsavedTextChanges || Boolean(pendingFile);
-  const activeDisplayImageUrl = pendingPreviewUrl || aboutPage.profileImageUrl;
+  const activeDisplayImageUrl = pendingPreviewUrl || formState.profileImageUrl || aboutPage.profileImageUrl;
   const isPublishedImageActive = Boolean(aboutPage.profileImageUrl) && !pendingPreviewUrl;
 
   return (
@@ -523,13 +535,37 @@ export const AdminAboutManager: React.FC = () => {
                 </p>
               </div>
 
-              {/* Staged File Details */}
-              {pendingFile && (
+              {!isStorageEnabled && (
+                <div className="rounded-xl bg-amber-50/90 border border-amber-200 px-3.5 py-2.5 text-[11px] text-amber-900 leading-relaxed">
+                  <strong>Mode Spark Plan (Gratis):</strong> Unggah file gambar langsung dinonaktifkan (
+                  <code className="font-mono">VITE_ENABLE_FIREBASE_STORAGE=false</code>) agar tidak memicu layanan berbayar. Gunakan kolom <strong>URL Gambar Eksternal</strong> di bawah untuk menyimpan tautan gambar sebagai metadata di Cloud Firestore.
+                </div>
+              )}
+
+              {/* External Image URL Metadata Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-800">
+                  URL Gambar Profil Eksternal (Metadata Cloud Firestore)
+                </label>
+                <div className="relative">
+                  <LinkIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="url"
+                    value={formState.profileImageUrl}
+                    onChange={(e) => updateTopField('profileImageUrl', e.target.value)}
+                    placeholder="https://www.menpan.go.id/... (kosongkan untuk memakai placeholder resmi)"
+                    className="w-full text-xs pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#07529A] focus:ring-2 focus:ring-[#07529A]/15 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* Staged File Details (only active when VITE_ENABLE_FIREBASE_STORAGE=true) */}
+              {pendingFile && isStorageEnabled && (
                 <div className="rounded-xl bg-blue-50/70 border border-blue-200 p-3.5 flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0">
                     <p className="font-bold text-slate-900 truncate">{pendingFile.name}</p>
                     <p className="text-[11px] text-slate-600 font-mono tabular-nums">
-                      {formatBytes(pendingFile.size)} · Siap diunggah permanen saat klik Simpan Perubahan
+                      {formatBytes(pendingFile.size)} · Akan diunggah ke Firebase Storage saat klik Simpan Perubahan
                     </p>
                   </div>
                   <button
@@ -544,16 +580,18 @@ export const AdminAboutManager: React.FC = () => {
 
               {/* Action Buttons Row */}
               <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                  <span>
-                    {aboutPage.profileImageUrl || pendingFile ? 'Ganti Gambar' : 'Unggah Gambar'}
-                  </span>
-                </button>
+                {isStorageEnabled && (
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>
+                      {aboutPage.profileImageUrl || pendingFile ? 'Ganti File Gambar' : 'Unggah File Gambar'}
+                    </span>
+                  </button>
+                )}
 
                 {pendingFile && (
                   <button

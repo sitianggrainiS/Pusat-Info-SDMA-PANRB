@@ -129,7 +129,7 @@ export const AdminCategoryManager: React.FC = () => {
   };
 
   // Save Topic (Create or Update)
-  const handleSave = () => {
+  const handleSave = async () => {
     const trimmedName = name.trim();
     if (!trimmedName) {
       setFormError('Nama topik tidak boleh kosong.');
@@ -138,37 +138,42 @@ export const AdminCategoryManager: React.FC = () => {
 
     const finalSlug = slug.trim() ? generateSlug(slug) : generateSlug(trimmedName);
 
-    if (isAdding) {
-      // Check for duplicate slug
-      const slugExists = categories.some((c) => c.slug === finalSlug);
-      const uniqueSlug = slugExists ? `${finalSlug}-${Date.now().toString().slice(-4)}` : finalSlug;
+    try {
+      setFormError(null);
+      if (isAdding) {
+        // Check for duplicate slug
+        const slugExists = categories.some((c) => c.slug === finalSlug);
+        const uniqueSlug = slugExists ? `${finalSlug}-${Date.now().toString().slice(-4)}` : finalSlug;
 
-      const created = createCategory({
-        name: trimmedName,
-        slug: uniqueSlug,
-        description: description.trim(),
-        iconName,
-      });
+        const created = await createCategory({
+          name: trimmedName,
+          slug: uniqueSlug,
+          description: description.trim(),
+          iconName,
+        });
 
-      showToast(`Topik "${created.name}" berhasil ditambahkan!`, 'success');
-    } else if (editingCategory) {
-      // Check for duplicate slug among other categories
-      const slugExists = categories.some(
-        (c) => c.slug === finalSlug && c.id !== editingCategory.id
-      );
-      const uniqueSlug = slugExists ? `${finalSlug}-${Date.now().toString().slice(-4)}` : finalSlug;
+        showToast(`Topik "${created.name}" berhasil disimpan ke Cloud Firestore!`, 'success');
+      } else if (editingCategory) {
+        // Check for duplicate slug among other categories
+        const slugExists = categories.some(
+          (c) => c.slug === finalSlug && c.id !== editingCategory.id
+        );
+        const uniqueSlug = slugExists ? `${finalSlug}-${Date.now().toString().slice(-4)}` : finalSlug;
 
-      updateCategory(editingCategory.id, {
-        name: trimmedName,
-        slug: uniqueSlug,
-        description: description.trim(),
-        iconName,
-      });
+        await updateCategory(editingCategory.id, {
+          name: trimmedName,
+          slug: uniqueSlug,
+          description: description.trim(),
+          iconName,
+        });
 
-      showToast(`Topik "${trimmedName}" berhasil diperbarui!`, 'success');
+        showToast(`Topik "${trimmedName}" berhasil diperbarui di Cloud Firestore!`, 'success');
+      }
+
+      cancelForm();
+    } catch (err: any) {
+      setFormError(err?.message || 'Gagal menyimpan topik ke Cloud Firestore.');
     }
-
-    cancelForm();
   };
 
   // Open Delete Confirmation Modal
@@ -190,34 +195,44 @@ export const AdminCategoryManager: React.FC = () => {
   };
 
   // Confirm Delete Topic
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deletingCategory) return;
     const catName = deletingCategory.name;
     const attachedCount = policies.filter((p) => p.categoryId === deletingCategory.id).length;
 
-    deleteCategory(deletingCategory.id, reassignTargetId || undefined);
+    try {
+      await deleteCategory(deletingCategory.id, reassignTargetId || undefined);
 
-    if (attachedCount > 0 && reassignTargetId) {
-      const targetCat = categories.find((c) => c.id === reassignTargetId);
-      showToast(
-        `Topik "${catName}" dihapus. Sebanyak ${attachedCount} kebijakan dialihkan ke "${targetCat?.name || 'topik lain'}".`,
-        'info'
-      );
-    } else {
-      showToast(`Topik "${catName}" berhasil dihapus.`, 'success');
+      if (attachedCount > 0 && reassignTargetId) {
+        const targetCat = categories.find((c) => c.id === reassignTargetId);
+        showToast(
+          `Topik "${catName}" dihapus. Sebanyak ${attachedCount} kebijakan dialihkan ke "${targetCat?.name || 'topik lain'}".`,
+          'info'
+        );
+      } else {
+        showToast(`Topik "${catName}" berhasil dihapus dari Cloud Firestore.`, 'success');
+      }
+
+      cancelDelete();
+    } catch (err: any) {
+      cancelDelete();
+      showToast(err?.message || 'Gagal menghapus topik dari Cloud Firestore.', 'error');
     }
-
-    cancelDelete();
   };
 
   // Reset to default 8 Klaster + Pilar Sekolah Kedinasan
-  const handleResetToDefault = () => {
-    resetCategoriesToDefault();
-    setShowResetConfirm(false);
-    showToast(
-      'Kategori telah dikembalikan ke 8 Klaster Manajemen ASN & Pilar Sekolah Kedinasan standar.',
-      'success'
-    );
+  const handleResetToDefault = async () => {
+    try {
+      await resetCategoriesToDefault();
+      setShowResetConfirm(false);
+      showToast(
+        'Kategori telah dikembalikan ke 8 Klaster Manajemen ASN & Pilar Sekolah Kedinasan standar di Cloud Firestore.',
+        'success'
+      );
+    } catch (err: any) {
+      setShowResetConfirm(false);
+      showToast(err?.message || 'Gagal mereset kategori ke Cloud Firestore.', 'error');
+    }
   };
 
   // Filter and sort categories

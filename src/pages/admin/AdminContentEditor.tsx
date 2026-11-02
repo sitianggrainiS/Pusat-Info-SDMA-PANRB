@@ -2,7 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Policy, PolicyStatus, SourceDocument } from '../../types';
-import { InstagramEmbed, extractInstagramInfo } from '../../components/common/InstagramEmbed';
+import {
+  InstagramEmbed,
+  extractInstagramInfo,
+  extractInstagramDateFromUrl,
+  resolvePolicyReleaseDate,
+} from '../../components/common/InstagramEmbed';
 import { CategoryIcon } from '../../components/common/CategoryIcon';
 import { CalendarDatePicker } from '../../components/common/CalendarDatePicker';
 import { STANDARD_KLASTER_IDS } from '../../data/initialData';
@@ -54,6 +59,8 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const existingPolicy = policyId ? policies.find((p) => p.id === policyId) : undefined;
+  const hasManualDateEditRef = useRef<boolean>(false);
+  const syncedPolicyIdRef = useRef<string | undefined>(existingPolicy?.id);
 
   // Form states
   const [instagramPostUrl, setInstagramPostUrl] = useState(
@@ -64,15 +71,23 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
   );
   const [title, setTitle] = useState(existingPolicy?.title || initialDraftData?.title || '');
   const [summary, setSummary] = useState(existingPolicy?.summary || initialDraftData?.summary || '');
-  const [instagramDate, setInstagramDate] = useState(
-    existingPolicy?.instagramDate ||
-      existingPolicy?.publicationDate ||
+  const [instagramDate, setInstagramDate] = useState(() => {
+    if (existingPolicy) {
+      const resolved = resolvePolicyReleaseDate(existingPolicy);
+      if (resolved && resolved !== '-') return resolved;
+    }
+    return (
       initialDraftData?.instagramDate ||
       initialDraftData?.publicationDate ||
+      extractInstagramDateFromUrl(
+        existingPolicy?.instagramPostUrl || initialDraftData?.instagramPostUrl
+      ) ||
       new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
-  );
+    );
+  });
   const [status, setStatus] = useState<PolicyStatus>(existingPolicy?.status || 'published');
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSavingPolicy, setIsSavingPolicy] = useState<boolean>(false);
 
   // Thumbnail states
   const [isManualOverride, setIsManualOverride] = useState<boolean>(
@@ -233,7 +248,28 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
     ? customThumbnailValue || autoDetectedThumbnail
     : autoDetectedThumbnail;
 
-  // Auto-generate title if user enters Instagram URL and title is empty
+  // Sync form fields if existingPolicy finishes loading from Firestore after initial mount
+  useEffect(() => {
+    if (existingPolicy && syncedPolicyIdRef.current !== existingPolicy.id) {
+      syncedPolicyIdRef.current = existingPolicy.id;
+      setInstagramPostUrl(existingPolicy.instagramPostUrl || '');
+      setCategoryId(existingPolicy.categoryId || categories[0]?.id || '');
+      setTitle(existingPolicy.title || '');
+      setSummary(existingPolicy.summary || '');
+      const resolved = resolvePolicyReleaseDate(existingPolicy);
+      if (resolved && resolved !== '-') {
+        setInstagramDate(resolved);
+      }
+      setStatus(existingPolicy.status || 'published');
+      setIsManualOverride(Boolean(existingPolicy.isCustomThumbnail));
+      setCustomThumbnailValue(existingPolicy.customThumbnail || existingPolicy.thumbnail || '');
+      setInstagramCaption(existingPolicy.instagramCaption || '');
+      setAiSummary(existingPolicy.aiSummary || '');
+      setIsAiSummaryApproved(Boolean(existingPolicy.isAiSummaryApproved && existingPolicy.aiSummary));
+    }
+  }, [existingPolicy, categories]);
+
+  // Auto-generate title & sync post upload date when user enters Instagram URL
   useEffect(() => {
     if (instagramInfo.isValid && !title.trim()) {
       if (instagramInfo.type === 'reel') {
@@ -242,7 +278,12 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
         setTitle('Infografis Edukasi Kebijakan SDM Aparatur');
       }
     }
-  }, [instagramInfo.cleanUrl]);
+    if (instagramInfo.isValid && instagramInfo.detectedDate && !hasManualDateEditRef.current) {
+      if (!existingPolicy || instagramInfo.cleanUrl !== existingPolicy.instagramPostUrl) {
+        setInstagramDate(instagramInfo.detectedDate);
+      }
+    }
+  }, [instagramInfo.cleanUrl, instagramInfo.detectedDate]);
 
   const handlePasteExample = () => {
     setInstagramPostUrl('https://www.instagram.com/p/Ddi76RtGXeH/');
@@ -261,12 +302,16 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
     try {
       setIsUploading(true);
       setUploadError(null);
-      const compressedDataUrl = await compressImageFile(file);
-      setCustomThumbnailValue(compressedDataUrl);
+      const uploadedUrl = await compressImageFile(file);
+      setCustomThumbnailValue(uploadedUrl);
       setIsManualOverride(true);
     } catch (err) {
-      console.error('Failed to compress uploaded image', err);
-      setUploadError('Gagal memproses gambar. Silakan coba file lain.');
+      console.error('Failed to process uploaded image', err);
+      setUploadError(
+        err instanceof Error
+          ? err.message
+          : 'Gagal memproses gambar. Gunakan URL gambar eksternal (https://...) atau cover bawaan.'
+      );
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -368,7 +413,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
     setAiSummaryError(null);
   };
 
-  const handleSave = (targetStatus: PolicyStatus = status) => {
+  const handleSave = async (targetStatus: PolicyStatus = status) => {
     const trimmedUrl = instagramPostUrl.trim();
     if (!trimmedUrl) {
       setFormError('URL Postingan Instagram wajib diisi.');
@@ -416,6 +461,16 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
         };
       });
 
+    const effectiveReleaseDate =
+      instagramDate.trim() ||
+      check.detectedDate ||
+      existingPolicy?.publicationDate ||
+      new Date().toLocaleDateString('id-ID', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
+
     const payload: Partial<Policy> = {
       title: finalTitle,
       slug,
@@ -430,8 +485,9 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
       customThumbnail: isManualOverride ? finalThumb : undefined,
       autoThumbnail: autoDetectedThumbnail,
       instagramPostUrl: check.cleanUrl,
-      instagramDate: instagramDate.trim(),
-      instagramAccountHandle: '@sdmapanrb',
+      instagramDate: effectiveReleaseDate,
+      instagramAccountHandle:
+        check.accountHandle || existingPolicy?.instagramAccountHandle || '@sdmapanrb',
       contextExplanation: summary.trim() || existingPolicy?.contextExplanation || '',
       sources: validSources,
       // AI Summary fields
@@ -441,23 +497,23 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
         ? existingPolicy?.aiSummaryGeneratedAt || new Date().toISOString()
         : undefined,
       instagramCaption: instagramCaption.trim() || undefined,
-      publicationDate:
-        instagramDate.trim() ||
-        existingPolicy?.publicationDate ||
-        new Date().toLocaleDateString('id-ID', {
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-        }),
+      publicationDate: effectiveReleaseDate,
     };
 
-    if (existingPolicy) {
-      updatePolicy(existingPolicy.id, payload);
-    } else {
-      createPolicy(payload);
+    try {
+      setIsSavingPolicy(true);
+      setFormError(null);
+      if (existingPolicy) {
+        await updatePolicy(existingPolicy.id, payload);
+      } else {
+        await createPolicy(payload);
+      }
+      navigateTo({ name: 'admin-content' });
+    } catch (err: any) {
+      setFormError(err?.message || 'Gagal menyimpan konten ke Cloud Firestore.');
+    } finally {
+      setIsSavingPolicy(false);
     }
-
-    navigateTo({ name: 'admin-content' });
   };
 
   return (
@@ -476,18 +532,20 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
           </button>
           <button
             type="button"
+            disabled={isSavingPolicy}
             onClick={() => handleSave('draft')}
-            className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+            className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 disabled:opacity-60 border border-amber-300 text-amber-900 text-xs font-bold rounded-xl transition-colors cursor-pointer"
           >
-            Simpan Draf
+            {isSavingPolicy ? 'Menyimpan...' : 'Simpan Draf'}
           </button>
           <button
             type="button"
+            disabled={isSavingPolicy}
             onClick={() => handleSave('published')}
-            className="px-4 py-2 bg-[#07529A] hover:bg-[#053d73] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+            className="px-4 py-2 bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
           >
             <Save className="w-3.5 h-3.5" />
-            <span>Simpan & Publikasikan</span>
+            <span>{isSavingPolicy ? 'Menyimpan ke Firestore...' : 'Simpan & Publikasikan'}</span>
           </button>
         </div>
       }
@@ -716,7 +774,10 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
               <div>
                 <CalendarDatePicker
                   value={instagramDate}
-                  onChange={setInstagramDate}
+                  onChange={(val) => {
+                    hasManualDateEditRef.current = Boolean(val.trim());
+                    setInstagramDate(val);
+                  }}
                   label="Tanggal Publikasi Instagram"
                 />
               </div>
@@ -1323,18 +1384,20 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  disabled={isSavingPolicy}
                   onClick={() => handleSave('draft')}
-                  className="px-4 py-2 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-xl transition-colors cursor-pointer"
+                  className="px-4 py-2 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 disabled:opacity-60 border border-amber-300 rounded-xl transition-colors cursor-pointer"
                 >
-                  Simpan Draf
+                  {isSavingPolicy ? 'Menyimpan...' : 'Simpan Draf'}
                 </button>
                 <button
                   type="button"
+                  disabled={isSavingPolicy}
                   onClick={() => handleSave('published')}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>Simpan & Publikasikan</span>
+                  <span>{isSavingPolicy ? 'Menyimpan ke Firestore...' : 'Simpan & Publikasikan'}</span>
                 </button>
               </div>
             </div>

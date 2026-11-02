@@ -93,6 +93,7 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
     deputyNews,
     categories,
     isDeputyNewsLoading,
+    isStorageEnabled,
     createDeputyNews,
     updateDeputyNews,
     setDeputyNewsStatus,
@@ -110,7 +111,9 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
   // Form Field States (strictly manual, never auto-fetched)
   const [articleUrl, setArticleUrl] = useState('');
   const [title, setTitle] = useState('');
-  const [thumbnailMode, setThumbnailMode] = useState<'upload' | 'url'>('upload');
+  const [thumbnailMode, setThumbnailMode] = useState<'upload' | 'url'>(
+    isStorageEnabled ? 'upload' : 'url'
+  );
   const [thumbnailData, setThumbnailData] = useState('');
   const [thumbnailUrlInput, setThumbnailUrlInput] = useState('');
   const [publicationDate, setPublicationDate] = useState('');
@@ -143,7 +146,7 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
     if (externalCreateModalOpen && !editingNews) {
       setArticleUrl('');
       setTitle('');
-      setThumbnailMode('upload');
+      setThumbnailMode(isStorageEnabled ? 'upload' : 'url');
       setThumbnailData('');
       setThumbnailUrlInput('');
       setPublicationDate('');
@@ -152,7 +155,7 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
       setFieldErrors({});
       setPreviewImgBroken(false);
     }
-  }, [externalCreateModalOpen, editingNews]);
+  }, [externalCreateModalOpen, editingNews, isStorageEnabled]);
 
   const openEditModal = (item: DeputyNews) => {
     const isDataUri = item.thumbnailUrl.startsWith('data:image/');
@@ -194,15 +197,18 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
     try {
       setIsUploadingImage(true);
       setFieldErrors((prev) => ({ ...prev, thumbnailUrl: undefined }));
-      const compressed = await compressImageFile(file, 1200, 0.85);
-      setThumbnailData(compressed);
+      const uploadedUrl = await compressImageFile(file, 1200, 0.85, 'deputy-news');
+      setThumbnailData(uploadedUrl);
       setThumbnailMode('upload');
       setPreviewImgBroken(false);
     } catch (err) {
-      console.error('Image compression error:', err);
+      console.error('Image upload error:', err);
       setFieldErrors((prev) => ({
         ...prev,
-        thumbnailUrl: 'Gagal memproses file gambar. Silakan coba gambar lain.',
+        thumbnailUrl:
+          err instanceof Error
+            ? err.message
+            : 'Gagal memproses file gambar. Silakan gunakan URL gambar eksternal (https://...).',
       }));
     } finally {
       setIsUploadingImage(false);
@@ -849,10 +855,16 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
                       </div>
                       <div>
                         <p className="text-xs font-bold text-slate-800">
-                          {thumbnailData ? 'File gambar berhasil dipilih' : 'Pilih gambar dari komputer / perangkat'}
+                          {!isStorageEnabled
+                            ? 'Firebase Storage Nonaktif (Spark Plan)'
+                            : thumbnailData
+                            ? 'File gambar berhasil diunggah'
+                            : 'Pilih gambar dari komputer / perangkat'}
                         </p>
                         <p className="text-[11px] text-slate-500">
-                          Mendukung format JPG, PNG, atau WEBP (otomatis dioptimalkan).
+                          {!isStorageEnabled
+                            ? 'Pilih tab "Masukkan URL Gambar" (https://...) untuk menyimpan metadata gambar permanen di Firestore.'
+                            : 'Mendukung format JPG, PNG, atau WEBP.'}
                         </p>
                       </div>
                     </div>

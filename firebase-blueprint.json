@@ -1,0 +1,782 @@
+{
+  "entities": {
+    "AdminProfile": {
+      "title": "AdminProfile",
+      "description": "Authorized administrator record for RBAC verification in Firestore Security Rules.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Authentication UID of the administrator.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Verified official email address of the administrator.",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "description": "Full display name of the administrator.",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "role": {
+          "type": "string",
+          "description": "Assigned RBAC role within Kedeputian SDMA.",
+          "enum": ["superadmin", "content_manager", "legal_reviewer", "editor"]
+        },
+        "department": {
+          "type": "string",
+          "description": "Organizational unit within Kementerian PANRB.",
+          "minLength": 0,
+          "maxLength": 200
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the admin profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the admin profile was last updated."
+        }
+      },
+      "required": ["uid", "email", "name", "role", "department", "createdAt", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Policy category representing 8 Klaster Manajemen ASN or Pilar Konten Sekolah Kedinasan.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique category identifier.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the policy cluster or content pillar.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "slug": {
+          "type": "string",
+          "description": "URL-safe slug for the category.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "description": {
+          "type": "string",
+          "description": "Summary of the policy cluster scope.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "iconName": {
+          "type": "string",
+          "description": "Lucide icon identifier.",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "group": {
+          "type": "string",
+          "description": "Category grouping between standard ASN clusters and thematic pillars.",
+          "enum": ["klaster", "pilar"]
+        },
+        "colorScheme": {
+          "type": "string",
+          "description": "Optional visual color accent token.",
+          "minLength": 0,
+          "maxLength": 50
+        },
+        "order": {
+          "type": "integer",
+          "description": "Display sort order index."
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Whether this category is publicly visible on the portal."
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "UID of the administrator who created the category.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "slug",
+        "description",
+        "iconName",
+        "group",
+        "colorScheme",
+        "order",
+        "isPublic",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SourceDocument": {
+      "title": "SourceDocument",
+      "description": "Official JDIH legal basis and regulatory source document.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique source document identifier.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Official title of the regulation.",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "regulationType": {
+          "type": "string",
+          "description": "Type of legal instrument (e.g. Peraturan Menteri PANRB).",
+          "minLength": 1,
+          "maxLength": 150
+        },
+        "regulationNumber": {
+          "type": "string",
+          "description": "Official number and year label.",
+          "minLength": 0,
+          "maxLength": 150
+        },
+        "year": {
+          "type": "string",
+          "description": "Enactment year.",
+          "minLength": 0,
+          "maxLength": 20
+        },
+        "articles": {
+          "type": "string",
+          "description": "Referenced articles or chapters.",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "fileUrl": {
+          "type": "string",
+          "description": "Official JDIH or PDF URL.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "description": {
+          "type": "string",
+          "description": "Summary of the regulation scope.",
+          "minLength": 0,
+          "maxLength": 5000
+        },
+        "isVerified": {
+          "type": "boolean",
+          "description": "Whether the regulation link has been verified."
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Whether the regulation is publicly visible."
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "UID of the administrator who created the source record.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "regulationType",
+        "regulationNumber",
+        "year",
+        "articles",
+        "fileUrl",
+        "description",
+        "isVerified",
+        "isPublic",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Policy": {
+      "title": "Policy",
+      "description": "Educational policy summary and Instagram infographic post entry.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique policy identifier.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Policy infographic title.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "slug": {
+          "type": "string",
+          "description": "URL-friendly slug.",
+          "minLength": 1,
+          "maxLength": 250
+        },
+        "categoryId": {
+          "type": "string",
+          "description": "Foreign key referencing /categories/{categoryId}.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short summary of the policy content.",
+          "minLength": 0,
+          "maxLength": 5000
+        },
+        "contextHeader": {
+          "type": "string",
+          "description": "Optional heading for the background context section.",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "contextExplanation": {
+          "type": "string",
+          "description": "Detailed background explanation.",
+          "minLength": 0,
+          "maxLength": 20000
+        },
+        "conceptA": {
+          "type": "object",
+          "description": "Optional first concept block for dual-concept comparison."
+        },
+        "conceptB": {
+          "type": "object",
+          "description": "Optional second concept block for dual-concept comparison."
+        },
+        "comparison": {
+          "type": "object",
+          "description": "Optional side-by-side comparison table."
+        },
+        "simultaneousExplanation": {
+          "type": "string",
+          "description": "Optional explanation when two mechanisms occur simultaneously.",
+          "minLength": 0,
+          "maxLength": 10000
+        },
+        "generalContent": {
+          "type": "string",
+          "description": "General narrative content.",
+          "minLength": 0,
+          "maxLength": 30000
+        },
+        "classifications": {
+          "type": "array",
+          "description": "Bounded list of job or policy classifications."
+        },
+        "requirementsHeader": {
+          "type": "string",
+          "description": "Optional heading for requirements section.",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "requirements": {
+          "type": "array",
+          "description": "Bounded list of requirement bullet strings."
+        },
+        "processStepsHeader": {
+          "type": "string",
+          "description": "Optional heading for process steps section.",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "processSteps": {
+          "type": "array",
+          "description": "Bounded list of procedural steps."
+        },
+        "faqs": {
+          "type": "array",
+          "description": "Bounded list of FAQ question-answer pairs."
+        },
+        "thumbnail": {
+          "type": "string",
+          "description": "Cover thumbnail URL metadata (external https URL or static asset path).",
+          "minLength": 0,
+          "maxLength": 2048
+        },
+        "instagramPostUrl": {
+          "type": "string",
+          "description": "Official Instagram post or Reel URL.",
+          "minLength": 0,
+          "maxLength": 1000
+        },
+        "instagramThumbnail": {
+          "type": "string",
+          "description": "Instagram cover URL reference.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "isCustomThumbnail": {
+          "type": "boolean",
+          "description": "Whether a manual cover override is active."
+        },
+        "customThumbnail": {
+          "type": "string",
+          "description": "Optional external custom cover URL.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "autoThumbnail": {
+          "type": "string",
+          "description": "Automatically detected fallback cover path.",
+          "minLength": 0,
+          "maxLength": 2000
+        },
+        "instagramDate": {
+          "type": "string",
+          "description": "Formatted Instagram post date.",
+          "minLength": 0,
+          "maxLength": 100
+        },
+        "instagramAccountHandle": {
+          "type": "string",
+          "description": "Instagram account handle (e.g. @sdmapanrb).",
+          "minLength": 0,
+          "maxLength": 100
+        },
+        "status": {
+          "type": "string",
+          "description": "Publication workflow status.",
+          "enum": ["draft", "review", "published"]
+        },
+        "sources": {
+          "type": "array",
+          "description": "Bounded list of associated legal source objects."
+        },
+        "relatedPolicyIds": {
+          "type": "array",
+          "description": "Bounded list of related policy IDs."
+        },
+        "publicationDate": {
+          "type": "string",
+          "description": "Public display date synchronized with Instagram date.",
+          "minLength": 0,
+          "maxLength": 100
+        },
+        "isFeatured": {
+          "type": "boolean",
+          "description": "Whether highlighted on the homepage."
+        },
+        "aiAssisted": {
+          "type": "boolean",
+          "description": "Whether AI document assistant helped draft content."
+        },
+        "aiSummary": {
+          "type": "string",
+          "description": "Approved 3-4 sentence executive summary.",
+          "minLength": 0,
+          "maxLength": 10000
+        },
+        "isAiSummaryApproved": {
+          "type": "boolean",
+          "description": "Whether admin approved displaying the executive summary."
+        },
+        "aiSummaryGeneratedAt": {
+          "type": "string",
+          "description": "ISO timestamp string when summary was generated.",
+          "minLength": 0,
+          "maxLength": 100
+        },
+        "instagramCaption": {
+          "type": "string",
+          "description": "Authorized Instagram caption text.",
+          "minLength": 0,
+          "maxLength": 15000
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "UID of the administrator who created the policy.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "slug",
+        "categoryId",
+        "summary",
+        "contextHeader",
+        "contextExplanation",
+        "simultaneousExplanation",
+        "generalContent",
+        "classifications",
+        "requirementsHeader",
+        "requirements",
+        "processStepsHeader",
+        "processSteps",
+        "faqs",
+        "thumbnail",
+        "instagramPostUrl",
+        "instagramThumbnail",
+        "isCustomThumbnail",
+        "customThumbnail",
+        "autoThumbnail",
+        "instagramDate",
+        "instagramAccountHandle",
+        "status",
+        "sources",
+        "relatedPolicyIds",
+        "publicationDate",
+        "isFeatured",
+        "aiAssisted",
+        "aiSummary",
+        "isAiSummaryApproved",
+        "aiSummaryGeneratedAt",
+        "instagramCaption",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "DeputyNews": {
+      "title": "DeputyNews",
+      "description": "Official news article item from Kedeputian Bidang SDM Aparatur.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique news article identifier.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "News headline.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "articleUrl": {
+          "type": "string",
+          "description": "Official menpan.go.id article URL.",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "thumbnailUrl": {
+          "type": "string",
+          "description": "News thumbnail URL metadata.",
+          "minLength": 0,
+          "maxLength": 2048
+        },
+        "publicationDate": {
+          "type": "string",
+          "description": "Publication date in YYYY-MM-DD format.",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "summary": {
+          "type": "string",
+          "description": "Brief summary of the news article.",
+          "minLength": 0,
+          "maxLength": 5000
+        },
+        "category": {
+          "type": "string",
+          "description": "News topic label.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "status": {
+          "type": "string",
+          "description": "Publication state.",
+          "enum": ["draft", "published"]
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "UID of the administrator who created the news item.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "articleUrl",
+        "thumbnailUrl",
+        "publicationDate",
+        "summary",
+        "category",
+        "status",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "HeroSlide": {
+      "title": "HeroSlide",
+      "description": "Homepage hero banner slide slot.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique hero slide slot ID.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "imageUrl": {
+          "type": "string",
+          "description": "Slide banner image URL metadata.",
+          "minLength": 0,
+          "maxLength": 2048
+        },
+        "title": {
+          "type": "string",
+          "description": "Slide caption title.",
+          "minLength": 0,
+          "maxLength": 300
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Whether the slide is active in the homepage carousel."
+        },
+        "order": {
+          "type": "integer",
+          "description": "Zero-based slot order (0..2)."
+        },
+        "isPublic": {
+          "type": "boolean",
+          "description": "Whether the slide slot is readable on the public homepage."
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "UID of the administrator who last configured the slot.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "imageUrl",
+        "title",
+        "isActive",
+        "order",
+        "isPublic",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AboutPageSiteContent": {
+      "title": "AboutPageSiteContent",
+      "description": "Institutional profile, organizational chart, and 6 unit work descriptions for Halaman Tentang.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Singleton document ID ('aboutPage').",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "heading": {
+          "type": "string",
+          "description": "Main heading on About page.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "subheading": {
+          "type": "string",
+          "description": "Subheading on About page.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "description": {
+          "type": "string",
+          "description": "Institutional overview paragraph.",
+          "minLength": 1,
+          "maxLength": 10000
+        },
+        "profileImageUrl": {
+          "type": "string",
+          "description": "Profile banner/photo URL metadata.",
+          "minLength": 0,
+          "maxLength": 2048
+        },
+        "profileImageUpdatedAt": {
+          "type": "string",
+          "description": "ISO timestamp string when profile image was last changed.",
+          "minLength": 0,
+          "maxLength": 100
+        },
+        "orgSectionTitle": {
+          "type": "string",
+          "description": "Organizational chart section title.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "orgTopLevelTitle": {
+          "type": "string",
+          "description": "Top node label in organizational chart.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "unitSectionTitle": {
+          "type": "string",
+          "description": "Unit duties section title.",
+          "minLength": 1,
+          "maxLength": 300
+        },
+        "unitSectionSubtitle": {
+          "type": "string",
+          "description": "Unit duties section subtitle.",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "units": {
+          "type": "array",
+          "description": "Exactly 6 organizational units of Kedeputian SDMA."
+        },
+        "visibility": {
+          "type": "string",
+          "description": "Public visibility marker.",
+          "enum": ["public"]
+        },
+        "authorUid": {
+          "type": "string",
+          "description": "UID of the administrator who published the content.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp."
+        }
+      },
+      "required": [
+        "id",
+        "heading",
+        "subheading",
+        "description",
+        "profileImageUrl",
+        "profileImageUpdatedAt",
+        "orgSectionTitle",
+        "orgTopLevelTitle",
+        "unitSectionTitle",
+        "unitSectionSubtitle",
+        "units",
+        "visibility",
+        "authorUid",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/admins/{adminUid}": {
+      "schema": "AdminProfile",
+      "description": "Authorized administrator registry for RBAC verification (PII isolated to owner/admins)."
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Policy clusters (8 Klaster Manajemen ASN) and thematic pillars (Sekolah Kedinasan)."
+    },
+    "/sources/{sourceId}": {
+      "schema": "SourceDocument",
+      "description": "Official JDIH regulatory source documents."
+    },
+    "/policies/{policyId}": {
+      "schema": "Policy",
+      "description": "Policy summaries and Instagram infographic educational posts."
+    },
+    "/deputyNews/{newsId}": {
+      "schema": "DeputyNews",
+      "description": "Official news articles from Kedeputian Bidang SDM Aparatur."
+    },
+    "/heroSlides/{slideId}": {
+      "schema": "HeroSlide",
+      "description": "Homepage hero banner carousel slots."
+    },
+    "/siteContent/{docId}": {
+      "schema": "AboutPageSiteContent",
+      "description": "Singleton institutional page content such as aboutPage."
+    }
+  }
+}

@@ -2,7 +2,11 @@ import React, { useState, useRef } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Policy, PolicyStatus } from '../../types';
-import { InstagramEmbed, extractInstagramInfo } from '../../components/common/InstagramEmbed';
+import {
+  InstagramEmbed,
+  extractInstagramInfo,
+  resolvePolicyReleaseDate,
+} from '../../components/common/InstagramEmbed';
 import { CategoryIcon } from '../../components/common/CategoryIcon';
 import {
   detectInstagramThumbnail,
@@ -108,21 +112,29 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
     return matchStatus && matchCluster && matchSearch;
   });
 
-  const confirmDeletePolicy = () => {
-    if (deletingPolicy) {
-      deletePolicy(deletingPolicy.id);
+  const confirmDeletePolicy = async () => {
+    if (!deletingPolicy) return;
+    try {
+      await deletePolicy(deletingPolicy.id);
       setDeletingPolicy(null);
-      showToast('Konten berhasil dihapus.');
+      showToast('Konten berhasil dihapus dari Cloud Firestore.');
+    } catch (err: any) {
+      setDeletingPolicy(null);
+      showToast(err?.message || 'Gagal menghapus konten dari Cloud Firestore.');
     }
   };
 
-  const handleToggleStatus = (id: string, currentStatus: PolicyStatus) => {
+  const handleToggleStatus = async (id: string, currentStatus: PolicyStatus) => {
     const nextStatus: PolicyStatus = currentStatus === 'published' ? 'draft' : 'published';
-    setPolicyStatus(id, nextStatus);
-    showToast(`Status berhasil diubah menjadi ${nextStatus === 'published' ? 'Terbit' : 'Draf'}.`);
+    try {
+      await setPolicyStatus(id, nextStatus);
+      showToast(`Status berhasil diubah menjadi ${nextStatus === 'published' ? 'Terbit' : 'Draf'}.`);
+    } catch (err: any) {
+      showToast(err?.message || 'Gagal memperbarui status di Cloud Firestore.');
+    }
   };
 
-  const handleQuickAdd = () => {
+  const handleQuickAdd = async () => {
     const trimmed = quickUrl.trim();
     if (!trimmed) {
       setQuickError('Tautan postingan Instagram wajib diisi.');
@@ -155,37 +167,45 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
       categoryId: quickClusterId,
     });
 
-    createPolicy({
-      title: titleToUse,
-      slug,
-      categoryId: quickClusterId,
-      summary:
-        'Materi edukasi kebijakan SDM Aparatur yang bersumber dari media sosial resmi KemenPANRB.',
-      status: quickStatus,
-      thumbnail: detectedThumb,
-      instagramPostUrl: check.cleanUrl,
-      instagramThumbnail: detectedThumb,
-      isCustomThumbnail: false,
-      autoThumbnail: detectedThumb,
-      instagramDate: new Date().toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      }),
-      instagramAccountHandle: '@sdmapanrb',
-      publicationDate: new Date().toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      }),
-    });
+    try {
+      await createPolicy({
+        title: titleToUse,
+        slug,
+        categoryId: quickClusterId,
+        summary:
+          'Materi edukasi kebijakan SDM Aparatur yang bersumber dari media sosial resmi KemenPANRB.',
+        status: quickStatus,
+        thumbnail: detectedThumb,
+        instagramPostUrl: check.cleanUrl,
+        instagramThumbnail: detectedThumb,
+        isCustomThumbnail: false,
+        autoThumbnail: detectedThumb,
+        instagramDate:
+          check.detectedDate ||
+          new Date().toLocaleDateString('id-ID', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          }),
+        instagramAccountHandle: check.accountHandle || '@sdmapanrb',
+        publicationDate:
+          check.detectedDate ||
+          new Date().toLocaleDateString('id-ID', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric',
+          }),
+      });
 
-    // Reset and close
-    setQuickUrl('');
-    setQuickTitle('');
-    setQuickError(null);
-    setQuickAddOpen(false);
-    showToast('Konten baru berhasil ditambahkan dengan cover otomatis.');
+      // Reset and close
+      setQuickUrl('');
+      setQuickTitle('');
+      setQuickError(null);
+      setQuickAddOpen(false);
+      showToast('Konten baru berhasil disimpan ke Cloud Firestore.');
+    } catch (err: any) {
+      setQuickError(err?.message || 'Gagal menyimpan konten ke Cloud Firestore.');
+    }
   };
 
   // Open Edit Thumbnail Modal
@@ -210,12 +230,16 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
     try {
       setIsUploading(true);
       setUploadError(null);
-      const compressed = await compressImageFile(file);
-      setModalSelectedThumbnail(compressed);
+      const uploadedUrl = await compressImageFile(file);
+      setModalSelectedThumbnail(uploadedUrl);
       setModalThumbnailMode('manual');
     } catch (err) {
       console.error('Failed to process image upload', err);
-      setUploadError('Gagal memproses gambar. Silakan coba file lain.');
+      setUploadError(
+        err instanceof Error
+          ? err.message
+          : 'Gagal memproses gambar. Gunakan URL gambar eksternal (https://...) atau cover bawaan.'
+      );
     } finally {
       setIsUploading(false);
       if (thumbnailFileInputRef.current) {
@@ -225,7 +249,7 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
   };
 
   // Save updated thumbnail
-  const handleSaveThumbnailModal = () => {
+  const handleSaveThumbnailModal = async () => {
     if (!editingThumbnailPolicy) return;
 
     const detected = detectInstagramThumbnail(editingThumbnailPolicy);
@@ -234,16 +258,21 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
         ? detected
         : modalSelectedThumbnail || detected;
 
-    updatePolicyThumbnail(
-      editingThumbnailPolicy.id,
-      finalThumb,
-      modalThumbnailMode === 'manual'
-    );
+    try {
+      await updatePolicyThumbnail(
+        editingThumbnailPolicy.id,
+        finalThumb,
+        modalThumbnailMode === 'manual'
+      );
 
-    setEditingThumbnailPolicy(null);
-    showToast(
-      `Thumbnail untuk "${editingThumbnailPolicy.title}" berhasil diperbarui!`
-    );
+      const savedTitle = editingThumbnailPolicy.title;
+      setEditingThumbnailPolicy(null);
+      showToast(
+        `Thumbnail untuk "${savedTitle}" berhasil diperbarui di Cloud Firestore!`
+      );
+    } catch (err: any) {
+      setUploadError(err?.message || 'Gagal memperbarui thumbnail di Cloud Firestore.');
+    }
   };
 
   return (
@@ -637,7 +666,7 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                         {/* Date */}
                         <td className="py-4 px-4 text-slate-600">
                           <div className="text-xs font-medium text-slate-800">
-                            {pol.instagramDate?.trim() || pol.publicationDate || '-'}
+                            {resolvePolicyReleaseDate(pol)}
                           </div>
                           <div className="text-[10px] text-slate-400">
                             {pol.instagramAccountHandle || '@sdmapanrb'}

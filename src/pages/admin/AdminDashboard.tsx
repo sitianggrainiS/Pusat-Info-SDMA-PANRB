@@ -2,6 +2,7 @@ import React from 'react';
 import { usePolicy } from '../../context/PolicyContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { ROLE_DEFINITIONS } from '../../data/adminUsers';
+import { resolvePolicyReleaseDate } from '../../utils/instagramUtils';
 import {
   FileCheck2,
   Tags,
@@ -205,7 +206,7 @@ export const AdminDashboard: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-slate-500 tabular-nums whitespace-nowrap">
-                        {pol.publicationDate}
+                        {resolvePolicyReleaseDate(pol)}
                       </td>
                       <td className="py-3.5 px-5 sm:px-6 text-right space-x-1.5 whitespace-nowrap">
                         <button

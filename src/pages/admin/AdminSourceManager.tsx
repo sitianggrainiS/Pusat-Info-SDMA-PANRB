@@ -53,42 +53,51 @@ export const AdminSourceManager: React.FC = () => {
     setFormError(null);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title.trim() || !regulationNumber.trim()) {
       setFormError('Judul dokumen dan nomor regulasi wajib diisi.');
       return;
     }
 
-    if (isAdding) {
-      createSource({
-        title: title.trim(),
-        regulationType,
-        regulationNumber: regulationNumber.trim(),
-        year: year.trim(),
-        articles: articles.trim(),
-        fileUrl: fileUrl.trim(),
-        description: description.trim(),
-        isVerified: true,
-      });
-    } else if (editingId) {
-      updateSource(editingId, {
-        title: title.trim(),
-        regulationType,
-        regulationNumber: regulationNumber.trim(),
-        year: year.trim(),
-        articles: articles.trim(),
-        fileUrl: fileUrl.trim(),
-        description: description.trim(),
-      });
-    }
+    try {
+      setFormError(null);
+      if (isAdding) {
+        await createSource({
+          title: title.trim(),
+          regulationType,
+          regulationNumber: regulationNumber.trim(),
+          year: year.trim(),
+          articles: articles.trim(),
+          fileUrl: fileUrl.trim(),
+          description: description.trim(),
+          isVerified: true,
+        });
+      } else if (editingId) {
+        await updateSource(editingId, {
+          title: title.trim(),
+          regulationType,
+          regulationNumber: regulationNumber.trim(),
+          year: year.trim(),
+          articles: articles.trim(),
+          fileUrl: fileUrl.trim(),
+          description: description.trim(),
+        });
+      }
 
-    cancelForm();
+      cancelForm();
+    } catch (err: any) {
+      setFormError(err?.message || 'Gagal menyimpan dokumen regulasi ke Cloud Firestore.');
+    }
   };
 
-  const confirmDelete = () => {
-    if (deletingSource) {
-      deleteSource(deletingSource.id);
+  const confirmDelete = async () => {
+    if (!deletingSource) return;
+    try {
+      await deleteSource(deletingSource.id);
       setDeletingSource(null);
+    } catch (err: any) {
+      setDeletingSource(null);
+      setFormError(err?.message || 'Gagal menghapus dokumen regulasi dari Cloud Firestore.');
     }
   };
 

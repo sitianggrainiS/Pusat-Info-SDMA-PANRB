@@ -1,4 +1,5 @@
 import { Policy } from '../types';
+import { StorageFolder, uploadImageAsset } from '../lib/storageService';
 
 export interface InstagramPreviewOption {
   id: string;
@@ -61,12 +62,10 @@ export function detectInstagramThumbnail(item: {
   const s = (item.slug || '').toLowerCase();
   const id = (item.id || '').toLowerCase();
 
-  // 1. Mengenal Jabatan Pelaksana -> infographic_jabatan_pelaksana_1790755819303.jpg
   if (t.includes('pelaksana') || s.includes('pelaksana') || id.includes('pelaksana')) {
     return '/src/assets/images/infographic_jabatan_pelaksana_1790755819303.jpg';
   }
 
-  // 2. Naik Pangkat vs Naik Jenjang -> infographic_naik_pangkat_1790755802597.jpg
   if (
     t.includes('naik pangkat') ||
     t.includes('jenjang') ||
@@ -77,7 +76,6 @@ export function detectInstagramThumbnail(item: {
     return '/src/assets/images/infographic_naik_pangkat_1790755802597.jpg';
   }
 
-  // 3. Manajemen Talenta & Sistem Merit -> infographic_manajemen_talenta_1790755861584.jpg
   if (
     t.includes('talenta') ||
     t.includes('merit') ||
@@ -88,71 +86,36 @@ export function detectInstagramThumbnail(item: {
     return '/src/assets/images/infographic_manajemen_talenta_1790755861584.jpg';
   }
 
-  // 4. Pola Karier -> pola_karier_pns_slide_1791792629283.jpg
   if (t.includes('karier') || s.includes('karier') || id.includes('karier')) {
     return '/src/assets/images/pola_karier_pns_slide_1791792629283.jpg';
   }
 
-  // Default fallback cover
   return '/src/assets/images/infographic_jabatan_pelaksana_1790755819303.jpg';
 }
 
-/**
- * Gets effective thumbnail for display:
- * 1. If manual override is active, returns thumbnail / customThumbnail
- * 2. Otherwise returns the detected Instagram cover
- */
 export function getEffectiveThumbnail(policy: Partial<Policy>): string {
   if (policy.isCustomThumbnail && policy.thumbnail) {
     return policy.thumbnail;
   }
   if (policy.thumbnail && !policy.thumbnail.includes('placeholder')) {
-    // If it's a valid non-empty thumbnail, use it
     return policy.thumbnail;
   }
   return detectInstagramThumbnail(policy);
 }
 
 /**
- * Resizes and compresses an image in browser using HTMLCanvasElement
- * to keep base64 strings lightweight (~100-250KB) preventing localStorage quota overflow.
+ * Uploads an image file to Firebase Cloud Storage ONLY when explicitly enabled
+ * (VITE_ENABLE_FIREBASE_STORAGE=true). When disabled on the Spark Plan, throws
+ * an honest explanation without storing binary blobs in Firestore or temporary storage.
  */
-export function compressImageFile(file: File, maxDimension = 1200, quality = 0.85): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) {
-          resolve(e.target?.result as string);
-          return;
-        }
-
-        ctx.drawImage(img, 0, 0, width, height);
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', quality);
-        resolve(compressedDataUrl);
-      };
-      img.onerror = () => reject(new Error('Gagal memproses file gambar.'));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => reject(new Error('Gagal membaca file dari penyimpanan lokal.'));
-    reader.readAsDataURL(file);
-  });
+export async function compressImageFile(
+  file: File,
+  maxDimension = 1100,
+  quality = 0.82,
+  folder: StorageFolder = 'policies'
+): Promise<string> {
+  const result = await uploadImageAsset(file, folder, maxDimension, quality);
+  return result.url;
 }
+
+

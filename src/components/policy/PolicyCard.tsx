@@ -3,6 +3,7 @@ import { Policy } from '../../types';
 import { usePolicy } from '../../context/PolicyContext';
 import { ArrowRight, Instagram } from 'lucide-react';
 import { getEffectiveThumbnail } from '../../utils/thumbnailUtils';
+import { resolvePolicyReleaseDate } from '../../utils/instagramUtils';
 
 interface PolicyCardProps {
   policy: Policy;
@@ -85,7 +86,7 @@ export const PolicyCard: React.FC<PolicyCardProps> = ({ policy, featured = false
               {category?.name || 'Kebijakan ASN'}
             </span>
             <span aria-hidden="true">·</span>
-            <span>{policy.publicationDate}</span>
+            <span>{resolvePolicyReleaseDate(policy)}</span>
             {policy.aiAssisted && (
               <>
                 <span aria-hidden="true">·</span>

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
-import { InstagramEmbed } from '../common/InstagramEmbed';
+import { InstagramEmbed, resolvePolicyReleaseDate } from '../common/InstagramEmbed';
 import { CategoryIcon } from '../common/CategoryIcon';
 import {
   Instagram,
@@ -218,7 +218,7 @@ export const InstagramClusterShowcase: React.FC = () => {
                               {activeCluster.name}
                             </span>
                             <span aria-hidden="true">·</span>
-                            <span>{post.publicationDate}</span>
+                            <span>{resolvePolicyReleaseDate(post)}</span>
                           </div>
                           <h4 className="font-bold text-slate-900 text-base sm:text-lg leading-snug">
                             {post.title}

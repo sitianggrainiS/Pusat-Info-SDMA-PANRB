@@ -1,0 +1,753 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // =========================================================================
+    // Global Hardened Primitives
+    // =========================================================================
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser()
+        && request.auth.token.email is string
+        && request.auth.token.email.size() <= 200
+        && request.auth.token.email in [
+          'sitianggraini.s.02@gmail.com',
+          'tim.kontensdma@menpan.go.id',
+          'afid.sdma@menpan.go.id',
+          'aghni.sdma@menpan.go.id',
+          'editor@menpan.go.id'
+        ];
+    }
+
+    function isAdmin() {
+      return isVerifiedUser() && (
+        isBootstrappedAdmin() ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isBoundedString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidUrlMetadata(val) {
+      return val is string
+        && val.size() <= 2048
+        && !val.matches('^data:.*')
+        && !val.matches('^blob:.*');
+    }
+
+    function isBoundedStringList(arr, maxItems, maxItemLen) {
+      return arr is list
+        && arr.size() <= maxItems
+        && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= maxItemLen));
+    }
+
+    function isBoundedMapList(arr, maxItems) {
+      return arr is list
+        && arr.size() <= maxItems
+        && (arr.size() == 0 || arr[0] is map);
+    }
+
+    // =========================================================================
+    // Entity Validation Blueprints (Anti-Update-Gap)
+    // =========================================================================
+
+    function isValidAdminProfile(data, adminUid) {
+      let requiredKeys = ['uid', 'email', 'name', 'role', 'department', 'createdAt', 'updatedAt'];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(requiredKeys)
+        && data.uid == adminUid
+        && isValidId(data.uid)
+        && isBoundedString(data.email, 3, 200)
+        && isBoundedString(data.name, 1, 150)
+        && data.role is string
+        && data.role.size() <= 30
+        && data.role in ['superadmin', 'content_manager', 'legal_reviewer', 'editor']
+        && isBoundedString(data.department, 0, 200)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidCategory(data, categoryId) {
+      let requiredKeys = [
+        'id',
+        'name',
+        'slug',
+        'description',
+        'iconName',
+        'group',
+        'colorScheme',
+        'order',
+        'isPublic',
+        'authorUid',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(requiredKeys)
+        && data.id == categoryId
+        && isValidId(data.id)
+        && isBoundedString(data.name, 1, 200)
+        && isBoundedString(data.slug, 1, 200)
+        && isBoundedString(data.description, 0, 2000)
+        && isBoundedString(data.iconName, 1, 80)
+        && data.group is string
+        && data.group.size() <= 20
+        && data.group in ['klaster', 'pilar']
+        && isBoundedString(data.colorScheme, 0, 50)
+        && data.order is int
+        && data.order >= 0
+        && data.order <= 1000
+        && data.isPublic is bool
+        && isValidId(data.authorUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidSourceDocument(data, sourceId) {
+      let requiredKeys = [
+        'id',
+        'title',
+        'regulationType',
+        'regulationNumber',
+        'year',
+        'articles',
+        'fileUrl',
+        'description',
+        'isVerified',
+        'isPublic',
+        'authorUid',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(requiredKeys)
+        && data.id == sourceId
+        && isValidId(data.id)
+        && isBoundedString(data.title, 1, 500)
+        && isBoundedString(data.regulationType, 1, 150)
+        && isBoundedString(data.regulationNumber, 0, 150)
+        && isBoundedString(data.year, 0, 20)
+        && isBoundedString(data.articles, 0, 500)
+        && isBoundedString(data.fileUrl, 0, 1000)
+        && isBoundedString(data.description, 0, 5000)
+        && data.isVerified is bool
+        && data.isPublic is bool
+        && isValidId(data.authorUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidConceptMap(concept) {
+      return concept is map
+        && concept.keys().hasAll(['title', 'description', 'keyPoints'])
+        && concept.keys().hasOnly(['title', 'description', 'keyPoints'])
+        && isBoundedString(concept.title, 0, 300)
+        && isBoundedString(concept.description, 0, 5000)
+        && isBoundedStringList(concept.keyPoints, 30, 1000);
+    }
+
+    function isValidComparisonMap(comp) {
+      return comp is map
+        && comp.keys().hasAll(['titleA', 'titleB', 'rows'])
+        && comp.keys().hasOnly(['titleA', 'titleB', 'rows'])
+        && isBoundedString(comp.titleA, 0, 300)
+        && isBoundedString(comp.titleB, 0, 300)
+        && isBoundedMapList(comp.rows, 40);
+    }
+
+    function isValidPolicy(data, policyId) {
+      let requiredKeys = [
+        'id',
+        'title',
+        'slug',
+        'categoryId',
+        'summary',
+        'contextHeader',
+        'contextExplanation',
+        'simultaneousExplanation',
+        'generalContent',
+        'classifications',
+        'requirementsHeader',
+        'requirements',
+        'processStepsHeader',
+        'processSteps',
+        'faqs',
+        'thumbnail',
+        'instagramPostUrl',
+        'instagramThumbnail',
+        'isCustomThumbnail',
+        'customThumbnail',
+        'autoThumbnail',
+        'instagramDate',
+        'instagramAccountHandle',
+        'status',
+        'sources',
+        'relatedPolicyIds',
+        'publicationDate',
+        'isFeatured',
+        'aiAssisted',
+        'aiSummary',
+        'isAiSummaryApproved',
+        'aiSummaryGeneratedAt',
+        'instagramCaption',
+        'authorUid',
+        'createdAt',
+        'updatedAt'
+      ];
+      let allowedKeys = [
+        'id',
+        'title',
+        'slug',
+        'categoryId',
+        'summary',
+        'contextHeader',
+        'contextExplanation',
+        'conceptA',
+        'conceptB',
+        'comparison',
+        'simultaneousExplanation',
+        'generalContent',
+        'classifications',
+        'requirementsHeader',
+        'requirements',
+        'processStepsHeader',
+        'processSteps',
+        'faqs',
+        'thumbnail',
+        'instagramPostUrl',
+        'instagramThumbnail',
+        'isCustomThumbnail',
+        'customThumbnail',
+        'autoThumbnail',
+        'instagramDate',
+        'instagramAccountHandle',
+        'status',
+        'sources',
+        'relatedPolicyIds',
+        'publicationDate',
+        'isFeatured',
+        'aiAssisted',
+        'aiSummary',
+        'isAiSummaryApproved',
+        'aiSummaryGeneratedAt',
+        'instagramCaption',
+        'authorUid',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(allowedKeys)
+        && data.id == policyId
+        && isValidId(data.id)
+        && isBoundedString(data.title, 1, 300)
+        && isBoundedString(data.slug, 1, 250)
+        && isValidId(data.categoryId)
+        && isBoundedString(data.summary, 0, 5000)
+        && isBoundedString(data.contextHeader, 0, 300)
+        && isBoundedString(data.contextExplanation, 0, 20000)
+        && (!('conceptA' in data) || isValidConceptMap(data.conceptA))
+        && (!('conceptB' in data) || isValidConceptMap(data.conceptB))
+        && (!('comparison' in data) || isValidComparisonMap(data.comparison))
+        && isBoundedString(data.simultaneousExplanation, 0, 10000)
+        && isBoundedString(data.generalContent, 0, 30000)
+        && isBoundedMapList(data.classifications, 30)
+        && isBoundedString(data.requirementsHeader, 0, 300)
+        && isBoundedStringList(data.requirements, 50, 1000)
+        && isBoundedString(data.processStepsHeader, 0, 300)
+        && isBoundedStringList(data.processSteps, 50, 1000)
+        && isBoundedMapList(data.faqs, 50)
+        && isValidUrlMetadata(data.thumbnail)
+        && isBoundedString(data.instagramPostUrl, 0, 1000)
+        && isValidUrlMetadata(data.instagramThumbnail)
+        && data.isCustomThumbnail is bool
+        && isValidUrlMetadata(data.customThumbnail)
+        && isValidUrlMetadata(data.autoThumbnail)
+        && isBoundedString(data.instagramDate, 0, 100)
+        && isBoundedString(data.instagramAccountHandle, 0, 100)
+        && data.status is string
+        && data.status.size() <= 20
+        && data.status in ['draft', 'review', 'published']
+        && isBoundedMapList(data.sources, 30)
+        && isBoundedStringList(data.relatedPolicyIds, 20, 128)
+        && isBoundedString(data.publicationDate, 0, 100)
+        && data.isFeatured is bool
+        && data.aiAssisted is bool
+        && isBoundedString(data.aiSummary, 0, 10000)
+        && data.isAiSummaryApproved is bool
+        && isBoundedString(data.aiSummaryGeneratedAt, 0, 100)
+        && isBoundedString(data.instagramCaption, 0, 15000)
+        && isValidId(data.authorUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDeputyNews(data, newsId) {
+      let requiredKeys = [
+        'id',
+        'title',
+        'articleUrl',
+        'thumbnailUrl',
+        'publicationDate',
+        'summary',
+        'category',
+        'status',
+        'authorUid',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(requiredKeys)
+        && data.id == newsId
+        && isValidId(data.id)
+        && isBoundedString(data.title, 1, 300)
+        && isBoundedString(data.articleUrl, 1, 1000)
+        && isValidUrlMetadata(data.thumbnailUrl)
+        && isBoundedString(data.publicationDate, 1, 50)
+        && isBoundedString(data.summary, 0, 5000)
+        && isBoundedString(data.category, 1, 200)
+        && data.status is string
+        && data.status.size() <= 20
+        && data.status in ['draft', 'published']
+        && isValidId(data.authorUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidHeroSlide(data, slideId) {
+      let requiredKeys = [
+        'id',
+        'imageUrl',
+        'title',
+        'isActive',
+        'order',
+        'isPublic',
+        'authorUid',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(requiredKeys)
+        && data.id == slideId
+        && isValidId(data.id)
+        && isValidUrlMetadata(data.imageUrl)
+        && isBoundedString(data.title, 0, 300)
+        && data.isActive is bool
+        && data.order is int
+        && data.order >= 0
+        && data.order <= 10
+        && data.isPublic is bool
+        && isValidId(data.authorUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAboutPageContent(data, docId) {
+      let requiredKeys = [
+        'id',
+        'heading',
+        'subheading',
+        'description',
+        'profileImageUrl',
+        'profileImageUpdatedAt',
+        'orgSectionTitle',
+        'orgTopLevelTitle',
+        'unitSectionTitle',
+        'unitSectionSubtitle',
+        'units',
+        'visibility',
+        'authorUid',
+        'createdAt',
+        'updatedAt'
+      ];
+      return data.keys().hasAll(requiredKeys)
+        && data.keys().hasOnly(requiredKeys)
+        && data.id == docId
+        && docId == 'aboutPage'
+        && isValidId(data.id)
+        && isBoundedString(data.heading, 1, 300)
+        && isBoundedString(data.subheading, 1, 300)
+        && isBoundedString(data.description, 1, 10000)
+        && isValidUrlMetadata(data.profileImageUrl)
+        && isBoundedString(data.profileImageUpdatedAt, 0, 100)
+        && isBoundedString(data.orgSectionTitle, 1, 300)
+        && isBoundedString(data.orgTopLevelTitle, 1, 300)
+        && isBoundedString(data.unitSectionTitle, 1, 300)
+        && isBoundedString(data.unitSectionSubtitle, 1, 1000)
+        && data.units is list
+        && data.units.size() == 6
+        && data.units[0] is map
+        && data.visibility is string
+        && data.visibility.size() <= 20
+        && data.visibility == 'public'
+        && isValidId(data.authorUid)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // =========================================================================
+    // Collection Match Blocks (Exhaustive for all 7 Blueprint Paths)
+    // =========================================================================
+
+    // 1. Administrator Registry (PII Isolated)
+    match /admins/{adminUid} {
+      allow get: if isVerifiedUser()
+        && isValidId(adminUid)
+        && (request.auth.uid == adminUid || isAdmin());
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isValidId(adminUid)
+        && isValidAdminProfile(incoming(), adminUid)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isVerifiedUser()
+        && isValidId(adminUid)
+        && isValidAdminProfile(incoming(), adminUid)
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'department', 'updatedAt'])
+        && isAdmin();
+
+      allow delete: if isVerifiedUser()
+        && isValidId(adminUid)
+        && request.auth.uid != adminUid
+        && isAdmin();
+    }
+
+    // 2. Policy Categories (8 Klaster Manajemen ASN & Pilar Sekolah Kedinasan)
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId)
+        && (isAdmin() || (resource != null && existing().isPublic == true));
+      allow list: if existing().isPublic == true
+        || isBootstrappedAdmin()
+        || (isVerifiedUser() && existing().authorUid == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(categoryId)
+        && isValidCategory(incoming(), categoryId)
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isVerifiedUser()
+        && isValidId(categoryId)
+        && isValidCategory(incoming(), categoryId)
+        && incoming().id == existing().id
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'name',
+            'slug',
+            'description',
+            'iconName',
+            'group',
+            'colorScheme',
+            'order',
+            'isPublic',
+            'updatedAt'
+          ])
+        )
+        && isAdmin();
+
+      allow delete: if isVerifiedUser()
+        && isValidId(categoryId)
+        && isAdmin();
+    }
+
+    // 3. Official JDIH Legal Basis & Source Documents
+    match /sources/{sourceId} {
+      allow get: if isValidId(sourceId)
+        && (isAdmin() || (resource != null && existing().isPublic == true));
+      allow list: if existing().isPublic == true
+        || isBootstrappedAdmin()
+        || (isVerifiedUser() && existing().authorUid == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(sourceId)
+        && isValidSourceDocument(incoming(), sourceId)
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isVerifiedUser()
+        && isValidId(sourceId)
+        && isValidSourceDocument(incoming(), sourceId)
+        && incoming().id == existing().id
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'title',
+            'regulationType',
+            'regulationNumber',
+            'year',
+            'articles',
+            'fileUrl',
+            'description',
+            'isVerified',
+            'isPublic',
+            'updatedAt'
+          ])
+        )
+        && isAdmin();
+
+      allow delete: if isVerifiedUser()
+        && isValidId(sourceId)
+        && isAdmin();
+    }
+
+    // 4. Policy Summaries & Instagram Infographics
+    match /policies/{policyId} {
+      allow get: if isValidId(policyId)
+        && (isAdmin() || (resource != null && existing().status == 'published'));
+      allow list: if existing().status == 'published'
+        || isBootstrappedAdmin()
+        || (isVerifiedUser() && existing().authorUid == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(policyId)
+        && isValidPolicy(incoming(), policyId)
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin()
+        && (
+          exists(/databases/$(database)/documents/categories/$(incoming().categoryId)) ||
+          existsAfter(/databases/$(database)/documents/categories/$(incoming().categoryId))
+        );
+
+      allow update: if isVerifiedUser()
+        && isValidId(policyId)
+        && isValidPolicy(incoming(), policyId)
+        && incoming().id == existing().id
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Quick Status Toggle
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+          // Action 2: Thumbnail Cover Override Update
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'thumbnail',
+            'instagramThumbnail',
+            'customThumbnail',
+            'isCustomThumbnail',
+            'updatedAt'
+          ]) ||
+          // Action 3: Full Admin Content Edit
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'title',
+            'slug',
+            'categoryId',
+            'summary',
+            'contextHeader',
+            'contextExplanation',
+            'conceptA',
+            'conceptB',
+            'comparison',
+            'simultaneousExplanation',
+            'generalContent',
+            'classifications',
+            'requirementsHeader',
+            'requirements',
+            'processStepsHeader',
+            'processSteps',
+            'faqs',
+            'thumbnail',
+            'instagramPostUrl',
+            'instagramThumbnail',
+            'isCustomThumbnail',
+            'customThumbnail',
+            'autoThumbnail',
+            'instagramDate',
+            'instagramAccountHandle',
+            'status',
+            'sources',
+            'relatedPolicyIds',
+            'publicationDate',
+            'isFeatured',
+            'aiAssisted',
+            'aiSummary',
+            'isAiSummaryApproved',
+            'aiSummaryGeneratedAt',
+            'instagramCaption',
+            'updatedAt'
+          ])
+        )
+        && isAdmin()
+        && (
+          exists(/databases/$(database)/documents/categories/$(incoming().categoryId)) ||
+          existsAfter(/databases/$(database)/documents/categories/$(incoming().categoryId))
+        );
+
+      allow delete: if isVerifiedUser()
+        && isValidId(policyId)
+        && isAdmin();
+    }
+
+    // 5. Official Deputy News Articles
+    match /deputyNews/{newsId} {
+      allow get: if isValidId(newsId)
+        && (isAdmin() || (resource != null && existing().status == 'published'));
+      allow list: if existing().status == 'published'
+        || isBootstrappedAdmin()
+        || (isVerifiedUser() && existing().authorUid == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(newsId)
+        && isValidDeputyNews(incoming(), newsId)
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isVerifiedUser()
+        && isValidId(newsId)
+        && isValidDeputyNews(incoming(), newsId)
+        && incoming().id == existing().id
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Status Toggle
+          incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']) ||
+          // Action 2: Full Article Update
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'title',
+            'articleUrl',
+            'thumbnailUrl',
+            'publicationDate',
+            'summary',
+            'category',
+            'status',
+            'updatedAt'
+          ])
+        )
+        && isAdmin();
+
+      allow delete: if isVerifiedUser()
+        && isValidId(newsId)
+        && isAdmin();
+    }
+
+    // 6. Homepage Hero Banner Slides (3 Fixed Slots)
+    match /heroSlides/{slideId} {
+      allow get: if isValidId(slideId)
+        && (isAdmin() || (resource != null && existing().isPublic == true));
+      allow list: if existing().isPublic == true
+        || isBootstrappedAdmin()
+        || (isVerifiedUser() && existing().authorUid == request.auth.uid);
+
+      allow create: if isVerifiedUser()
+        && isValidId(slideId)
+        && isValidHeroSlide(incoming(), slideId)
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isVerifiedUser()
+        && isValidId(slideId)
+        && isValidHeroSlide(incoming(), slideId)
+        && incoming().id == existing().id
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'imageUrl',
+            'title',
+            'isActive',
+            'order',
+            'isPublic',
+            'updatedAt'
+          ])
+        )
+        && isAdmin();
+
+      allow delete: if isVerifiedUser()
+        && isValidId(slideId)
+        && isAdmin();
+    }
+
+    // 7. Singleton Institutional Site Content (About Page)
+    match /siteContent/{docId} {
+      allow get: if isValidId(docId)
+        && docId == 'aboutPage'
+        && (resource == null || existing().visibility == 'public' || isAdmin());
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isValidId(docId)
+        && isValidAboutPageContent(incoming(), docId)
+        && incoming().authorUid == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && isAdmin();
+
+      allow update: if isVerifiedUser()
+        && isValidId(docId)
+        && isValidAboutPageContent(incoming(), docId)
+        && incoming().id == existing().id
+        && incoming().authorUid == existing().authorUid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'heading',
+            'subheading',
+            'description',
+            'profileImageUrl',
+            'profileImageUpdatedAt',
+            'orgSectionTitle',
+            'orgTopLevelTitle',
+            'unitSectionTitle',
+            'unitSectionSubtitle',
+            'units',
+            'visibility',
+            'updatedAt'
+          ])
+        )
+        && isAdmin();
+
+      allow delete: if isVerifiedUser()
+        && isValidId(docId)
+        && isAdmin();
+    }
+  }
+}

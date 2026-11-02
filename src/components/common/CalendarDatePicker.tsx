@@ -251,7 +251,17 @@ export const CalendarDatePicker: React.FC<CalendarDatePickerProps> = ({
             <div className="flex items-center gap-1.5 flex-1 justify-center">
               <select
                 value={currentMonth}
-                onChange={(e) => setCurrentMonth(parseInt(e.target.value, 10))}
+                onChange={(e) => {
+                  const nextMonth = parseInt(e.target.value, 10);
+                  setCurrentMonth(nextMonth);
+                  if (value) {
+                    const maxDay = new Date(currentYear, nextMonth + 1, 0).getDate();
+                    const clampedDay = Math.min(selectedDate.getDate(), maxDay);
+                    const updated = new Date(currentYear, nextMonth, clampedDay);
+                    setSelectedDate(updated);
+                    onChange(formatIndonesianDate(updated));
+                  }
+                }}
                 className="text-xs font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-[#07529A] cursor-pointer"
               >
                 {INDONESIAN_MONTHS.map((m, idx) => (
@@ -263,7 +273,17 @@ export const CalendarDatePicker: React.FC<CalendarDatePickerProps> = ({
 
               <select
                 value={currentYear}
-                onChange={(e) => setCurrentYear(parseInt(e.target.value, 10))}
+                onChange={(e) => {
+                  const nextYear = parseInt(e.target.value, 10);
+                  setCurrentYear(nextYear);
+                  if (value) {
+                    const maxDay = new Date(nextYear, currentMonth + 1, 0).getDate();
+                    const clampedDay = Math.min(selectedDate.getDate(), maxDay);
+                    const updated = new Date(nextYear, currentMonth, clampedDay);
+                    setSelectedDate(updated);
+                    onChange(formatIndonesianDate(updated));
+                  }
+                }}
                 className="text-xs font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-[#07529A] cursor-pointer"
               >
                 {years.map((y) => (
