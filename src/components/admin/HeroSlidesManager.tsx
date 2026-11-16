@@ -2,7 +2,17 @@ import React, { useState, useRef } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
 import { HeroSlide } from '../../types';
 import { HERO_SLIDE_SLOT_COUNT, normalizeHeroSlides } from '../../data/initialHeroSlides';
-import { compressImageFile } from '../../utils/thumbnailUtils';
+import { compressImageForFirestore } from '../../utils/thumbnailUtils';
+import {
+  isTemporaryRuntimeUploadUrl,
+  normalizeStaticImageUrl,
+} from '../../data/staticImages';
+import { StaticAssetPicker, UploadLimitationNotice } from './StaticAssetPicker';
+import {
+  UrlImagePreviewStatus,
+  ImagePreviewLoadState,
+} from './UrlImagePreviewStatus';
+import { validateDirectImageUrl } from '../../utils/imageUrlUtils';
 import {
   Plus,
   Upload,
@@ -37,7 +47,7 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
   onCloseExternalCreateModal,
   onShowToast,
 }) => {
-  const { heroSlides, isStorageEnabled, saveHeroSlides, resetHeroSlides } = usePolicy();
+  const { heroSlides, saveHeroSlides, resetHeroSlides } = usePolicy();
 
   // Always work with 3 normalized slots (Slot 1, Slot 2, Slot 3)
   const slots = React.useMemo(() => normalizeHeroSlides(heroSlides), [heroSlides]);
@@ -50,6 +60,8 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
   const [formImageUrl, setFormImageUrl] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
   const [formError, setFormError] = useState<string | null>(null);
+  const [slidePreviewLoadState, setSlidePreviewLoadState] =
+    useState<ImagePreviewLoadState>('idle');
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -77,6 +89,7 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
       setFormImageUrl(hasImage ? targetSlot.imageUrl : '');
       setFormIsActive(hasImage ? targetSlot.isActive : true);
       setFormError(null);
+      setSlidePreviewLoadState('idle');
     },
     [slots]
   );
@@ -102,6 +115,7 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
   const closeFormModal = () => {
     setEditingSlotIndex(null);
     setFormError(null);
+    setSlidePreviewLoadState('idle');
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -116,18 +130,14 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
     try {
       setIsUploading(true);
       setFormError(null);
-      const uploadedUrl = await compressImageFile(file, 1400, 0.86, 'hero-slides');
-      setFormImageUrl(uploadedUrl);
-      if (!formTitle.trim()) {
-        const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]+/g, ' ');
-        setFormTitle(cleanName.charAt(0).toUpperCase() + cleanName.slice(1));
-      }
+      const localPreviewUrl = await compressImageForFirestore(file);
+      setFormImageUrl(localPreviewUrl);
     } catch (err) {
-      console.error('Failed to upload slide image:', err);
+      console.error('Failed to process slide image:', err);
       setFormError(
         err instanceof Error
           ? err.message
-          : 'Gagal memproses file gambar. Gunakan URL gambar eksternal (https://...).'
+          : 'Gagal memproses file gambar. Pilih dari Aset Proyek (/images/...) atau gunakan URL https://...'
       );
     } finally {
       setIsUploading(false);
@@ -141,30 +151,36 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
     e.preventDefault();
     if (editingSlotIndex === null) return;
 
-    const cleanImg = formImageUrl.trim();
-    const cleanTitle =
-      formTitle.trim() || `Visual Kebijakan SDM Aparatur #${editingSlotIndex + 1}`;
+    const rawTrimmed = formImageUrl.trim();
+    const cleanTitle = formTitle.trim();
 
-    if (!cleanImg) {
-      setFormError('Silakan masukkan URL gambar (https://...) atau pilih gambar default.');
-      return;
-    }
-
-    if (cleanImg.startsWith('data:') || cleanImg.startsWith('blob:')) {
+    if (!rawTrimmed) {
       setFormError(
-        'Penyimpanan file gambar langsung belum tersedia karena Firebase Storage dinonaktifkan (VITE_ENABLE_FIREBASE_STORAGE=false). Gunakan URL gambar eksternal (https://...).'
+        'Silakan pilih gambar dari Galeri Aset Proyek (/images/...) atau masukkan URL gambar (https://...).'
       );
       return;
     }
 
-    if (
-      !cleanImg.startsWith('/') &&
-      !cleanImg.startsWith('https://') &&
-      !cleanImg.startsWith('http://')
-    ) {
-      setFormError('Format URL gambar tidak valid. Gunakan URL https://...');
+    const check = validateDirectImageUrl(rawTrimmed, {
+      allowEmpty: false,
+      allowDataUrl: true,
+    });
+    if (!check.isValid) {
+      setFormError(
+        check.error ||
+          'Format path/URL gambar tidak valid. Gunakan /images/nama-gambar.jpg atau URL https://...'
+      );
       return;
     }
+
+    if (slidePreviewLoadState === 'error') {
+      setFormError(
+        'URL gambar gagal dimuat. Pastikan tautan mengarah langsung ke file gambar yang valid dan dapat diakses publik sebelum menyimpan.'
+      );
+      return;
+    }
+
+    const cleanImg = check.cleanUrl;
 
     try {
       setIsSaving(true);
@@ -189,8 +205,8 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
       await saveHeroSlides(nextSlots);
       notify(
         wasEmpty
-          ? `Gambar berhasil ditambahkan ke Slot Slide #${editingSlotIndex + 1}.`
-          : `Gambar pada Slot Slide #${editingSlotIndex + 1} berhasil diperbarui.`
+          ? `Gambar berhasil disimpan ke Slot Slide #${editingSlotIndex + 1} di Cloud Firestore.`
+          : `Slot Slide #${editingSlotIndex + 1} berhasil diperbarui di Cloud Firestore.`
       );
       closeFormModal();
     } catch (err: any) {
@@ -208,8 +224,12 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
     const [moved] = reordered.splice(index, 1);
     reordered.splice(targetIndex, 0, moved);
 
-    await saveHeroSlides(reordered);
-    notify(`Urutan Slot #${index + 1} dipindahkan ke Slot #${targetIndex + 1}.`);
+    try {
+      await saveHeroSlides(reordered);
+      notify(`Urutan Slot #${index + 1} dipindahkan ke Slot #${targetIndex + 1}.`);
+    } catch (err: any) {
+      notify(err?.message || 'Gagal mengubah urutan slot di Firestore.');
+    }
   };
 
   const handleToggleActive = async (slotIndex: number) => {
@@ -225,12 +245,16 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
     const nextSlots = slots.map((s, idx) =>
       idx === slotIndex ? { ...s, isActive: !s.isActive } : s
     );
-    await saveHeroSlides(nextSlots);
-    notify(
-      !slide.isActive
-        ? `Slot Slide #${slotIndex + 1} kini ditampilkan di beranda.`
-        : `Slot Slide #${slotIndex + 1} disembunyikan dari beranda.`
-    );
+    try {
+      await saveHeroSlides(nextSlots);
+      notify(
+        !slide.isActive
+          ? `Slot Slide #${slotIndex + 1} kini ditampilkan di beranda.`
+          : `Slot Slide #${slotIndex + 1} disembunyikan dari beranda.`
+      );
+    } catch (err: any) {
+      notify(err?.message || 'Gagal mengubah status tampil slot di Firestore.');
+    }
   };
 
   const handleConfirmClearSlot = async () => {
@@ -258,17 +282,27 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
       }
     }
 
-    await saveHeroSlides(nextSlots);
-    const clearedNum = clearingSlotIndex + 1;
-    setClearingSlotIndex(null);
-    notify(`Slot Slide #${clearedNum} berhasil dikosongkan.`);
+    try {
+      await saveHeroSlides(nextSlots);
+      const clearedNum = clearingSlotIndex + 1;
+      setClearingSlotIndex(null);
+      notify(`Slot Slide #${clearedNum} berhasil dikosongkan.`);
+    } catch (err: any) {
+      setClearingSlotIndex(null);
+      notify(err?.message || 'Gagal mengosongkan slot di Firestore.');
+    }
   };
 
   const handleConfirmReset = async () => {
-    await resetHeroSlides();
-    setShowResetConfirm(false);
-    setPreviewIndex(0);
-    notify('Ketiga slot slide beranda dikembalikan ke gambar standar bawaan.');
+    try {
+      await resetHeroSlides();
+      setShowResetConfirm(false);
+      setPreviewIndex(0);
+      notify('Ketiga slot slide beranda dikembalikan ke gambar standar bawaan.');
+    } catch (err: any) {
+      setShowResetConfirm(false);
+      notify(err?.message || 'Gagal mereset slot slide di Firestore.');
+    }
   };
 
   const clearingSlot = clearingSlotIndex !== null ? slots[clearingSlotIndex] : null;
@@ -368,7 +402,7 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
                       >
                         <img
                           src={slide.imageUrl}
-                          alt={slide.title || `Slot Slide ${idx + 1}`}
+                          alt={slide.title || ''}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
                         <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
@@ -436,21 +470,21 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
                         )}
                       </div>
 
-                      <h4
-                        className={`text-xs sm:text-sm font-bold truncate ${
-                          hasImage ? 'text-slate-900' : 'text-slate-500'
-                        }`}
-                      >
-                        {hasImage
-                          ? slide.title || `Slide Kebijakan SDM Aparatur #${idx + 1}`
-                          : `Belum Ada Gambar di Slot #${idx + 1}`}
-                      </h4>
+                      {!hasImage ? (
+                        <h4 className="text-xs sm:text-sm font-bold truncate text-slate-500">
+                          Belum Ada Gambar di Slot #{idx + 1}
+                        </h4>
+                      ) : slide.title ? (
+                        <h4 className="text-xs sm:text-sm font-bold truncate text-slate-900">
+                          {slide.title}
+                        </h4>
+                      ) : null}
 
                       <p className="text-[11px] font-mono text-slate-400 truncate max-w-xs">
                         {!hasImage
-                          ? 'Klik tombol Isi Gambar untuk mengunggah foto'
+                          ? 'Klik tombol Isi Gambar untuk memilih aset'
                           : slide.imageUrl.startsWith('data:image/')
-                          ? 'Gambar Unggahan Perangkat'
+                          ? 'Unggahan Perangkat (Tersimpan di Cloud Firestore)'
                           : slide.imageUrl}
                       </p>
                     </div>
@@ -523,7 +557,7 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
                     <div key={slide.id || idx} className="w-full shrink-0 aspect-4/3 bg-slate-100">
                       <img
                         src={slide.imageUrl}
-                        alt={slide.title}
+                        alt={slide.title || ''}
                         className="w-full h-full object-cover"
                       />
                     </div>
@@ -575,22 +609,6 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
                     </button>
                   </>
                 )}
-              </div>
-
-              <div className="mt-2 sm:mt-0 sm:absolute sm:bottom-4 sm:left-4 sm:right-4 bg-white/95 backdrop-blur-md p-3 rounded-xl border border-slate-200/80 shadow-md z-10">
-                <div className="flex items-start gap-2.5">
-                  <div className="w-7 h-7 rounded-lg bg-[#FFD84D]/90 text-[#07529A] flex items-center justify-center shrink-0 text-xs">
-                    💡
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-[11px] font-bold text-slate-900">Konsep Tiga Tingkat:</p>
-                    <p className="text-[10px] text-slate-600 mt-0.5 leading-snug">
-                      <strong className="text-[#07529A]">Instagram</strong> (visual ringkas) →{' '}
-                      <strong className="text-[#07529A]">Website</strong> (penjelasan lengkap) →{' '}
-                      <strong className="text-[#07529A]">Dokumen Resmi</strong> (dasar hukum).
-                    </p>
-                  </div>
-                </div>
               </div>
             </div>
           ) : (
@@ -689,45 +707,19 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
                 })}
               </div>
 
-              {/* Upload from Device */}
-              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-[#07529A] flex items-center justify-center shrink-0 shadow-2xs">
-                    <Upload className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="font-bold text-slate-900 block text-xs">
-                      {isStorageEnabled
-                        ? 'Unggah Foto / Gambar dari Perangkat'
-                        : 'Unggah File Perangkat (Nonaktif pada Spark Plan)'}
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      {isStorageEnabled
-                        ? 'Mendukung JPG, PNG, WEBP (rasio ideal 4:3 atau lanskap)'
-                        : 'Firebase Storage nonaktif (VITE_ENABLE_FIREBASE_STORAGE=false). Gunakan kolom URL Gambar di bawah.'}
-                    </span>
-                  </div>
-                </div>
+              {/* 1. Primary Permanent Option: Project Static Assets (/images/...) */}
+              <StaticAssetPicker
+                selectedUrl={formImageUrl}
+                onSelect={(assetPath) => {
+                  setFormImageUrl(assetPath);
+                  setFormError(null);
+                }}
+              />
 
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={isUploading}
-                  className="px-3.5 py-2 bg-[#07529A] hover:bg-[#053d73] text-white rounded-xl font-bold text-xs shadow-2xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                >
-                  {isUploading ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <FolderOpen className="w-3.5 h-3.5" />
-                  )}
-                  <span>{isUploading ? 'Memproses...' : 'Pilih File Foto'}</span>
-                </button>
-              </div>
-
-              {/* Image URL Input */}
+              {/* 2. Path / External URL Input */}
               <div className="space-y-1.5">
                 <label className="block text-xs font-bold text-slate-800">
-                  Atau Masukkan URL Gambar
+                  Path Aset Proyek (/images/...) atau URL Gambar Eksternal (https://...)
                 </label>
                 <div className="relative">
                   <LinkIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
@@ -737,25 +729,60 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
                     onChange={(e) => setFormImageUrl(e.target.value)}
                     placeholder={
                       formImageUrl.startsWith('data:image/')
-                        ? 'Gambar dari perangkat telah dipilih (isi URL jika ingin mengganti)...'
-                        : 'https://...'
+                        ? 'Pratinjau file perangkat sedang dipilih (ketik /images/... atau https://... untuk mengganti)...'
+                        : '/images/nama-gambar.jpg atau https://...'
                     }
                     className="w-full text-xs pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#07529A] focus:ring-2 focus:ring-[#07529A]/15 focus:outline-none"
                   />
                 </div>
               </div>
 
+              {/* 3. Device Upload (Temporary Preview Session Only) + Honest Limitation Notice */}
+              <div className="space-y-2.5">
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-[#07529A] flex items-center justify-center shrink-0 shadow-2xs">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-slate-900 block text-xs">
+                        Unggah File Gambar dari Perangkat (Disimpan ke Firestore)
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        File dikompresi otomatis dan disimpan langsung ke Cloud Firestore.
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="px-3.5 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-xl font-bold text-xs shadow-2xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    {isUploading ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#07529A]" />
+                    ) : (
+                      <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+                    )}
+                    <span>{isUploading ? 'Memproses...' : 'Pilih File Gambar'}</span>
+                  </button>
+                </div>
+
+                <UploadLimitationNotice isTemporaryActive={false} />
+              </div>
+
               {/* Title & Active Toggle */}
               <div className="grid grid-cols-1 sm:grid-cols-12 gap-4 items-end">
                 <div className="sm:col-span-8 space-y-1.5">
                   <label className="block text-xs font-bold text-slate-800">
-                    Judul / Keterangan Gambar
+                    Judul / Keterangan Gambar <span className="font-normal text-slate-400">(Opsional)</span>
                   </label>
                   <input
                     type="text"
                     value={formTitle}
                     onChange={(e) => setFormTitle(e.target.value)}
-                    placeholder="Contoh: Transformasi Manajemen Talenta ASN"
+                    placeholder="Kosongkan jika tidak perlu diberi judul"
                     className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#07529A] focus:ring-2 focus:ring-[#07529A]/15 focus:outline-none"
                   />
                 </div>
@@ -773,24 +800,15 @@ export const HeroSlidesManager: React.FC<HeroSlidesManagerProps> = ({
                 </div>
               </div>
 
-              {/* Selected Image Preview */}
+              {/* Selected Image Preview & Load Verification */}
               {formImageUrl && (
-                <div className="pt-2 border-t border-slate-100 flex items-center gap-3.5">
-                  <div className="w-28 aspect-4/3 rounded-xl overflow-hidden border border-slate-200 bg-slate-100 shrink-0">
-                    <img
-                      src={formImageUrl}
-                      alt="Pratinjau Slide"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <div className="text-xs text-slate-600 space-y-0.5 min-w-0">
-                    <p className="font-bold text-slate-900 truncate">
-                      {formTitle || `Pratinjau Slot Slide #${editingSlotIndex + 1}`}
-                    </p>
-                    <p className="text-[11px] text-slate-500">
-                      Gambar siap disimpan ke Slot Slide #{editingSlotIndex + 1}.
-                    </p>
-                  </div>
+                <div className="pt-2 border-t border-slate-100">
+                  <UrlImagePreviewStatus
+                    imageUrl={formImageUrl}
+                    label={formTitle || `Pratinjau Slot Slide #${editingSlotIndex + 1}`}
+                    allowEmpty={false}
+                    onStatusChange={(st) => setSlidePreviewLoadState(st)}
+                  />
                 </div>
               )}
 

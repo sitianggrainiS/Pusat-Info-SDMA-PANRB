@@ -1,0 +1,29 @@
+[
+  {
+    "id": "hero-slide-1",
+    "imageUrl": "/assets/aistudio/462411664_513021548204419_9151970918488268348_n__1__223b9cc0.jpg",
+    "title": "",
+    "isActive": true,
+    "order": 0,
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "updatedAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "hero-slide-2",
+    "imageUrl": "/assets/aistudio/Screenshot_2026-10-26_100608_a9ae79d1.png",
+    "title": "",
+    "isActive": true,
+    "order": 1,
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "updatedAt": "2025-01-01T00:00:00.000Z"
+  },
+  {
+    "id": "hero-slide-3",
+    "imageUrl": "/assets/aistudio/Heading__3__00fd1277.png",
+    "title": "",
+    "isActive": true,
+    "order": 2,
+    "createdAt": "2025-01-01T00:00:00.000Z",
+    "updatedAt": "2025-01-01T00:00:00.000Z"
+  }
+]

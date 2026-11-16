@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Policy } from '../../types';
 import { usePolicy } from '../../context/PolicyContext';
 import { ArrowRight, Instagram } from 'lucide-react';
-import { getEffectiveThumbnail } from '../../utils/thumbnailUtils';
+import { resolvePolicyMedia } from '../../utils/imageUrlUtils';
 import { resolvePolicyReleaseDate } from '../../utils/instagramUtils';
+import { getPolicyAboutDescription } from '../../utils/policySummaryUtils';
 
 interface PolicyCardProps {
   policy: Policy;
@@ -14,7 +15,11 @@ export const PolicyCard: React.FC<PolicyCardProps> = ({ policy, featured = false
   const { navigateTo, getCategoryById } = usePolicy();
   const [imgError, setImgError] = useState(false);
   const category = getCategoryById(policy.categoryId);
-  const thumbnailSrc = getEffectiveThumbnail(policy);
+  const thumbnailSrc = resolvePolicyMedia(policy).imageUrl;
+
+  useEffect(() => {
+    setImgError(false);
+  }, [thumbnailSrc]);
 
   const handleClick = () => {
     navigateTo({ name: 'policy-detail', slug: policy.slug });
@@ -104,14 +109,14 @@ export const PolicyCard: React.FC<PolicyCardProps> = ({ policy, featured = false
           </h3>
 
           <p className="text-xs sm:text-sm text-slate-600 line-clamp-3 leading-relaxed mb-4">
-            {policy.summary}
+            {getPolicyAboutDescription(policy).text}
           </p>
         </div>
 
         {/* Action Link */}
         <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-2 text-xs font-bold text-[#07529A]">
           <span className="group-hover:translate-x-0.5 transition-transform flex items-center gap-1.5">
-            <span>Pelajari selengkapnya</span>
+            <span>Lihat Selengkapnya</span>
             <ArrowRight className="w-3.5 h-3.5" />
           </span>
           <span className="text-slate-400 font-normal text-[11px] tabular-nums shrink-0">

@@ -16,13 +16,11 @@ import {
   Menu,
   Images,
   Building2,
-  ShieldCheck,
   CheckCircle2,
+  ShieldCheck,
   AlertTriangle,
-  RefreshCw,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { FirestoreAuditModal } from './FirestoreAuditModal';
 
 interface AdminLayoutProps {
   children: React.ReactNode;
@@ -45,23 +43,21 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 }) => {
   const {
     adminUser,
-    isFirebaseAuthConnected,
-    loginWithGoogleFirebase,
-    isDataStale,
-    syncStatusMessage,
-    isRetryingFirestore,
-    retryFirestoreConnection,
-    lastFirestoreError,
-    clearFirestoreError,
     logoutAdmin,
     navigateTo,
     resetToDemoData,
+    isFirebaseVerifiedAdmin,
+    firebaseUser,
+    loginWithGoogle,
   } = usePolicy();
   const [showResetModal, setShowResetModal] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
-  const [showAuditModal, setShowAuditModal] = useState(false);
+  const [isConnectingFirebase, setIsConnectingFirebase] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [syncNotice, setSyncNotice] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const perms = adminUser?.permissions;
+  const isSuperAdmin = adminUser?.role === 'superadmin' || Boolean(perms?.canManageUsers);
 
   const navLinks = [
     {
@@ -69,45 +65,52 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
       label: 'Dashboard',
       icon: LayoutDashboard,
       route: { name: 'admin-dashboard' } as AppRoute,
+      visible: true,
     },
     {
       id: 'content',
       label: 'Manajemen Konten',
       icon: FileText,
       route: { name: 'admin-content', initialTab: 'instagram' } as AppRoute,
+      visible: true,
     },
     {
       id: 'hero-slides',
       label: 'Slide Banner Beranda',
       icon: Images,
       route: { name: 'admin-content', initialTab: 'hero-slides' } as AppRoute,
+      visible: isSuperAdmin || Boolean(perms?.canPublishPolicies) || adminUser?.role === 'editor',
     },
     {
       id: 'about-page',
       label: 'Kelola Halaman Tentang',
       icon: Building2,
       route: { name: 'admin-about' } as AppRoute,
+      visible: isSuperAdmin || Boolean(perms?.canPublishPolicies),
     },
     {
       id: 'categories',
       label: 'Manajemen Topik',
       icon: Tags,
       route: { name: 'admin-categories' } as AppRoute,
+      visible: isSuperAdmin || Boolean(perms?.canEditCategories),
     },
     {
       id: 'sources',
       label: 'Dasar Hukum & Dokumen',
       icon: FileCheck,
       route: { name: 'admin-sources' } as AppRoute,
+      visible: isSuperAdmin || Boolean(perms?.canManageSources),
     },
     {
       id: 'ai-assistant',
       label: 'AI Dokumen Asisten',
       icon: Sparkles,
       route: { name: 'admin-ai-assistant' } as AppRoute,
-      badge: 'Gemini 3.8',
+      badge: 'Gemini 4',
+      visible: isSuperAdmin || Boolean(perms?.canUseAI),
     },
-  ];
+  ].filter((item) => item.visible);
 
   const handleSelectNav = (route: AppRoute) => {
     navigateTo(route);
@@ -184,31 +187,20 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           <ExternalLink className="w-3.5 h-3.5 text-slate-400" />
         </button>
 
-        {/* Audit & Safe Read/Write Test for Cloud Firestore */}
-        <button
-          type="button"
-          onClick={() => {
-            setMobileSidebarOpen(false);
-            setShowAuditModal(true);
-          }}
-          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-300 hover:text-emerald-300 text-[11px] transition-colors cursor-pointer rounded-lg hover:bg-slate-800/60"
-        >
-          <ShieldCheck className="w-3.5 h-3.5 shrink-0 text-emerald-400" />
-          <span>Audit & Uji Koneksi Firestore</span>
-        </button>
-
-        {/* Reset demo data */}
-        <button
-          type="button"
-          onClick={() => {
-            setMobileSidebarOpen(false);
-            setShowResetModal(true);
-          }}
-          className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-400 hover:text-amber-300 text-[11px] transition-colors cursor-pointer rounded-lg hover:bg-slate-800/50"
-        >
-          <RotateCcw className="w-3 h-3 shrink-0" />
-          <span>Reset ke Data Demo Default</span>
-        </button>
+        {/* Reset demo data (Super Admin only) */}
+        {isSuperAdmin && (
+          <button
+            type="button"
+            onClick={() => {
+              setMobileSidebarOpen(false);
+              setShowResetModal(true);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-1.5 text-slate-400 hover:text-amber-300 text-[11px] transition-colors cursor-pointer rounded-lg hover:bg-slate-800/50"
+          >
+            <RotateCcw className="w-3 h-3 shrink-0" />
+            <span>Reset ke Data Demo Default</span>
+          </button>
+        )}
 
         {/* User badge & Logout */}
         <div className="pt-2.5 border-t border-slate-800/90 space-y-2.5">
@@ -305,69 +297,39 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0">
-        {!isFirebaseAuthConnected && (
-          <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 lg:px-8 py-2.5 flex flex-wrap items-center justify-between gap-2 text-xs text-amber-900">
-            <span>
-              Untuk menyimpan perubahan secara permanen ke Cloud Firestore (<strong>sdmaapp</strong>), hubungkan sesi Google Admin terverifikasi Anda.
-            </span>
-            <button
-              type="button"
-              onClick={async () => {
-                const res = await loginWithGoogleFirebase();
-                if (!res.success && res.error) {
-                  setSyncNotice({ ok: false, text: res.error });
-                } else if (res.success) {
-                  setSyncNotice({
-                    ok: true,
-                    text: 'Sesi Firebase Auth terhubung. Seluruh perubahan kini tersimpan permanen di Cloud Firestore.',
-                  });
-                }
-              }}
-              className="px-3 py-1.5 rounded-lg bg-[#07529A] hover:bg-[#053d73] text-white font-bold text-[11px] transition-colors cursor-pointer shrink-0"
-            >
-              Hubungkan Google (Firebase Auth)
-            </button>
-          </div>
-        )}
-
-        {isDataStale && syncStatusMessage && (
-          <div className="px-4 sm:px-6 lg:px-8 py-2.5 border-b bg-amber-50 border-amber-200 text-amber-950 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
-              <span>{syncStatusMessage}</span>
+        {adminUser && !isFirebaseVerifiedAdmin && (
+          <div className="px-4 sm:px-6 lg:px-8 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-900 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>
+                {firebaseUser
+                  ? `UID (${firebaseUser.uid}) belum terverifikasi sebagai Admin aktif pada koleksi Firestore admins.`
+                  : 'Sesi Firebase Authentication belum aktif — silakan masuk kembali agar operasi Tambah, Edit, dan Hapus tersimpan ke Cloud Firestore.'}
+              </span>
             </div>
             <button
               type="button"
-              disabled={isRetryingFirestore}
+              disabled={isConnectingFirebase}
               onClick={async () => {
-                const ok = await retryFirestoreConnection();
-                if (ok) {
+                setIsConnectingFirebase(true);
+                const res = await loginWithGoogle();
+                setIsConnectingFirebase(false);
+                if (res.success) {
                   setSyncNotice({
                     ok: true,
-                    text: 'Koneksi Cloud Firestore berhasil dipulihkan dan data telah diperbarui dari server.',
+                    text: 'Sesi Firebase Authentication terverifikasi untuk tulis-baca Cloud Firestore.',
+                  });
+                } else {
+                  setSyncNotice({
+                    ok: false,
+                    text: res.error || 'Gagal memverifikasi akses Firebase Admin.',
                   });
                 }
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 font-bold text-[11px] transition-colors cursor-pointer disabled:opacity-60 shrink-0"
+              className="px-3 py-1.5 rounded-lg bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 text-white font-bold text-[11px] transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
             >
-              <RefreshCw className={`w-3 h-3 ${isRetryingFirestore ? 'animate-spin' : ''}`} />
-              <span>{isRetryingFirestore ? 'Menghubungkan...' : 'Coba Hubungkan Ulang'}</span>
-            </button>
-          </div>
-        )}
-
-        {lastFirestoreError && (
-          <div className="px-4 sm:px-6 lg:px-8 py-2.5 border-b bg-rose-50 border-rose-200 text-rose-900 flex items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600" />
-              <span>{lastFirestoreError}</span>
-            </div>
-            <button
-              type="button"
-              onClick={clearFirestoreError}
-              className="text-rose-600 hover:text-rose-900 p-1 rounded cursor-pointer"
-            >
-              <X className="w-3.5 h-3.5" />
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>{isConnectingFirebase ? 'Memverifikasi...' : 'Verifikasi Ulang Firebase Auth'}</span>
             </button>
           </div>
         )}
@@ -444,7 +406,7 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
               </div>
 
               <p className="text-xs sm:text-[13px] text-slate-600 leading-relaxed">
-                Tindakan ini akan mengembalikan seluruh data kebijakan, 8 klaster manajemen ASN, dan dokumen regulasi ke data standar bawaan demo. Lanjutkan?
+                Tindakan ini akan mengembalikan seluruh data kebijakan, 8 klaster manajemen ASN, pilar konten, dan slide banner ke data bawaan standar proyek. Lanjutkan?
               </p>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
@@ -465,13 +427,13 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
                       setShowResetModal(false);
                       setSyncNotice({
                         ok: true,
-                        text: 'Data referensi standar berhasil dipulihkan dan disimpan ke Cloud Firestore.',
+                        text: 'Data referensi standar dan aset bawaan berhasil dipulihkan ke Cloud Firestore.',
                       });
                     } catch (err: any) {
                       setShowResetModal(false);
                       setSyncNotice({
                         ok: false,
-                        text: err?.message || 'Gagal mereset data ke Cloud Firestore.',
+                        text: err?.message || 'Gagal mereset data standar.',
                       });
                     } finally {
                       setIsResetting(false);
@@ -486,12 +448,6 @@ export const AdminLayout: React.FC<AdminLayoutProps> = ({
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Firestore Connection Audit & Safe Read/Write Test Modal */}
-      <FirestoreAuditModal
-        isOpen={showAuditModal}
-        onClose={() => setShowAuditModal(false)}
-      />
     </div>
   );
 };

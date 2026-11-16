@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
-import { DEFAULT_HERO_SLIDES } from '../../data/initialHeroSlides';
 import { Search, ArrowRight, Instagram, ShieldCheck, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -9,14 +8,13 @@ interface HeroProps {
 }
 
 export const Hero: React.FC<HeroProps> = ({ onSearchFocus }) => {
-  const { navigateTo, heroSlides } = usePolicy();
+  const { navigateTo, heroSlides, isHeroSlidesLoading } = usePolicy();
   const [searchInput, setSearchInput] = useState('');
 
   const activeSlides = React.useMemo(() => {
     const activeFilled = heroSlides.filter((s) => s.isActive && Boolean(s.imageUrl));
     if (activeFilled.length > 0) return activeFilled;
-    const anyFilled = heroSlides.filter((s) => Boolean(s.imageUrl));
-    return anyFilled.length > 0 ? anyFilled : DEFAULT_HERO_SLIDES;
+    return heroSlides.filter((s) => Boolean(s.imageUrl));
   }, [heroSlides]);
 
   const [currentSlide, setCurrentSlide] = useState(0);
@@ -312,28 +310,61 @@ export const Hero: React.FC<HeroProps> = ({ onSearchFocus }) => {
                 }`}
               >
                 {/* Sliding Image Track */}
-                <div
-                  style={{
-                    transform: `translate3d(calc(-${safeSlideIndex * 100}% + ${dragOffset}px), 0, 0)`,
-                  }}
-                  className={`flex w-full will-change-transform ${
-                    isDragging
-                      ? 'transition-none'
-                      : 'transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]'
-                  }`}
-                >
-                  {activeSlides.map((slide, idx) => (
-                    <div key={slide.id || idx} className="w-full shrink-0 aspect-4/3 relative bg-slate-100">
-                      <img
-                        src={slide.imageUrl}
-                        alt={slide.title || 'Edukasi Kebijakan SDM Aparatur'}
-                        referrerPolicy="no-referrer"
-                        draggable={false}
-                        className="w-full h-full object-cover pointer-events-none select-none"
-                      />
+                {activeSlides.length > 0 ? (
+                  <div
+                    style={{
+                      transform: `translate3d(calc(-${safeSlideIndex * 100}% + ${dragOffset}px), 0, 0)`,
+                    }}
+                    className={`flex w-full will-change-transform ${
+                      isDragging
+                        ? 'transition-none'
+                        : 'transition-transform duration-500 ease-[cubic-bezier(0.16,1,0.3,1)]'
+                    }`}
+                  >
+                    {activeSlides.map((slide, idx) => (
+                      <div key={slide.id || idx} className="w-full shrink-0 aspect-4/3 relative bg-slate-100">
+                        <img
+                          key={slide.imageUrl}
+                          src={slide.imageUrl}
+                          alt={slide.title || ''}
+                          referrerPolicy="no-referrer"
+                          draggable={false}
+                          onError={(e) => {
+                            const target = e.currentTarget;
+                            if (
+                              !target.src.endsWith(
+                                '/assets/aistudio/462411664_513021548204419_9151970918488268348_n__1__223b9cc0.jpg'
+                              )
+                            ) {
+                              target.src =
+                                '/assets/aistudio/462411664_513021548204419_9151970918488268348_n__1__223b9cc0.jpg';
+                            }
+                          }}
+                          className="w-full h-full object-cover pointer-events-none select-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                ) : isHeroSlidesLoading ? (
+                  <div className="w-full aspect-4/3 bg-slate-200/80 animate-pulse" />
+                ) : (
+                  <div className="w-full aspect-4/3 bg-gradient-to-br from-[#07529A] via-[#0B3C75] to-[#0B1528] p-6 sm:p-8 flex flex-col justify-between text-white">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold uppercase tracking-widest text-[#FFD84D]">
+                        KOMPAK SDMA
+                      </span>
+                      <ShieldCheck className="w-5 h-5 text-[#FFD84D]" />
                     </div>
-                  ))}
-                </div>
+                    <div className="space-y-1.5">
+                      <p className="text-base sm:text-lg font-extrabold leading-snug">
+                        Kedeputian Bidang Sumber Daya Manusia Aparatur
+                      </p>
+                      <p className="text-xs text-blue-100/85">
+                        Kementerian Pendayagunaan Aparatur Negara dan Reformasi Birokrasi
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Top Pagination Dots & Counter (visible when > 1 slide) */}
                 {activeSlides.length > 1 && (
@@ -349,7 +380,11 @@ export const Hero: React.FC<HeroProps> = ({ onSearchFocus }) => {
                             key={slide.id || idx}
                             type="button"
                             onClick={() => setCurrentSlide(idx)}
-                            aria-label={`Tampilkan gambar ${idx + 1}: ${slide.title}`}
+                            aria-label={
+                              slide.title
+                                ? `Tampilkan gambar ${idx + 1}: ${slide.title}`
+                                : `Tampilkan gambar ${idx + 1}`
+                            }
                             className={`h-1.5 rounded-full transition-all duration-300 cursor-pointer ${
                               isActive
                                 ? 'w-5 bg-[#FFD84D]'

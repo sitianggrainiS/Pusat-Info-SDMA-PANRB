@@ -1,5 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Clock, Check } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X, Check } from 'lucide-react';
+import {
+  INDONESIAN_MONTH_LABELS,
+  parseContentDate,
+  formatDateToIndonesian,
+  formatDateToIsoInput,
+} from '../../utils/dateUtils';
 
 interface CalendarDatePickerProps {
   value: string;
@@ -8,10 +14,7 @@ interface CalendarDatePickerProps {
   placeholder?: string;
 }
 
-const INDONESIAN_MONTHS = [
-  'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
-  'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
-];
+const INDONESIAN_MONTHS = INDONESIAN_MONTH_LABELS;
 
 const DAYS_OF_WEEK = [
   { label: 'Min', full: 'Minggu', isWeekend: true },
@@ -32,23 +35,10 @@ export const CalendarDatePicker: React.FC<CalendarDatePickerProps> = ({
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Parse initial date or default to current date
+  // Parse initial date accurately without timezone drift or default to current date
   const parseInitialDate = (): Date => {
-    if (!value) return new Date();
-    // Try parsing Indonesian format: "14 Oktober 2024"
-    const parts = value.trim().split(' ');
-    if (parts.length === 3) {
-      const day = parseInt(parts[0], 10);
-      const monthIdx = INDONESIAN_MONTHS.findIndex(
-        (m) => m.toLowerCase() === parts[1].toLowerCase()
-      );
-      const year = parseInt(parts[2], 10);
-      if (!isNaN(day) && monthIdx !== -1 && !isNaN(year)) {
-        return new Date(year, monthIdx, day);
-      }
-    }
-    const standardDate = new Date(value);
-    if (!isNaN(standardDate.getTime())) return standardDate;
+    const parsed = parseContentDate(value);
+    if (parsed) return parsed;
     return new Date();
   };
 
@@ -90,10 +80,7 @@ export const CalendarDatePicker: React.FC<CalendarDatePickerProps> = ({
   }, [isOpen]);
 
   const formatIndonesianDate = (date: Date): string => {
-    const day = date.getDate();
-    const month = INDONESIAN_MONTHS[date.getMonth()];
-    const year = date.getFullYear();
-    return `${day} ${month} ${year}`;
+    return formatDateToIndonesian(date);
   };
 
   const handlePrevMonth = () => {
@@ -176,8 +163,11 @@ export const CalendarDatePicker: React.FC<CalendarDatePickerProps> = ({
     );
   };
 
-  // Generate Year options (current year - 5 to + 3)
-  const years = Array.from({ length: 10 }, (_, i) => new Date().getFullYear() - 6 + i);
+  // Generate Year options (2018 through current year + 5, plus selected year if outside range)
+  const baseNowYear = new Date().getFullYear();
+  const minYear = Math.min(2018, selectedDate.getFullYear(), currentYear);
+  const maxYear = Math.max(baseNowYear + 5, selectedDate.getFullYear(), currentYear);
+  const years = Array.from({ length: maxYear - minYear + 1 }, (_, i) => minYear + i);
 
   return (
     <div className="relative" ref={containerRef}>
@@ -304,29 +294,52 @@ export const CalendarDatePicker: React.FC<CalendarDatePickerProps> = ({
             </button>
           </div>
 
-          {/* Quick Presets */}
-          <div className="flex items-center justify-between gap-1.5 py-2.5 border-b border-slate-100 text-[11px]">
-            <button
-              type="button"
-              onClick={handleSetToday}
-              className="flex-1 py-1 px-1 text-center font-bold rounded-lg bg-blue-50 hover:bg-blue-100 text-[#07529A] border border-blue-200 transition-colors cursor-pointer"
-            >
-              Hari Ini
-            </button>
-            <button
-              type="button"
-              onClick={handleSetYesterday}
-              className="flex-1 py-1 px-1 text-center font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-            >
-              Kemarin
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSetDaysAgo(7)}
-              className="flex-1 py-1 px-1 text-center font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
-            >
-              7 Hari Lalu
-            </button>
+          {/* Quick Presets & Direct Input */}
+          <div className="space-y-2 py-2.5 border-b border-slate-100 text-[11px]">
+            <div className="flex items-center justify-between gap-1.5">
+              <button
+                type="button"
+                onClick={handleSetToday}
+                className="flex-1 py-1 px-1 text-center font-bold rounded-lg bg-blue-50 hover:bg-blue-100 text-[#07529A] border border-blue-200 transition-colors cursor-pointer"
+              >
+                Hari Ini
+              </button>
+              <button
+                type="button"
+                onClick={handleSetYesterday}
+                className="flex-1 py-1 px-1 text-center font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+              >
+                Kemarin
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSetDaysAgo(7)}
+                className="flex-1 py-1 px-1 text-center font-semibold rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer"
+              >
+                7 Hari Lalu
+              </button>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-semibold text-slate-500 shrink-0">
+                Ketik Tanggal:
+              </span>
+              <input
+                type="date"
+                value={formatDateToIsoInput(value)}
+                onChange={(e) => {
+                  const rawIso = e.target.value;
+                  if (!rawIso) return;
+                  const parsed = parseContentDate(rawIso);
+                  if (parsed) {
+                    setSelectedDate(parsed);
+                    setCurrentMonth(parsed.getMonth());
+                    setCurrentYear(parsed.getFullYear());
+                    onChange(formatDateToIndonesian(parsed));
+                  }
+                }}
+                className="flex-1 text-[11px] font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 focus:outline-none focus:border-[#07529A] tabular-nums"
+              />
+            </div>
           </div>
 
           {/* Days of Week Header */}

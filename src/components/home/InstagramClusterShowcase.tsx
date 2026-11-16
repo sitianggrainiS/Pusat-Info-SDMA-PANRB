@@ -1,6 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
-import { InstagramEmbed, resolvePolicyReleaseDate } from '../common/InstagramEmbed';
+import { PolicyMediaFrame } from '../policy/PolicyMediaFrame';
+import { resolvePolicyMedia } from '../../utils/imageUrlUtils';
+import { getPolicyDisplayDate, sortPoliciesByInputDate } from '../../utils/dateUtils';
+import { getPolicyAboutDescription } from '../../utils/policySummaryUtils';
 import { CategoryIcon } from '../common/CategoryIcon';
 import {
   Instagram,
@@ -27,6 +30,17 @@ export const InstagramClusterShowcase: React.FC = () => {
   const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(false);
 
+  useEffect(() => {
+    if (categories.length === 0) return;
+    const isValid = categories.some((c) => c.id === activeClusterId);
+    if (!activeClusterId || !isValid) {
+      const preferred =
+        categories.find((c) => publishedPolicies.some((p) => p.categoryId === c.id))?.id ||
+        categories[0].id;
+      setActiveClusterId(preferred);
+    }
+  }, [categories, publishedPolicies, activeClusterId]);
+
   const updateScrollButtons = () => {
     const el = tabsScrollRef.current;
     if (!el) return;
@@ -52,7 +66,10 @@ export const InstagramClusterShowcase: React.FC = () => {
   };
 
   const activeCluster = categories.find((c) => c.id === activeClusterId) || categories[0];
-  const clusterPosts = publishedPolicies.filter((p) => p.categoryId === activeCluster?.id);
+  const clusterPosts = sortPoliciesByInputDate(
+    publishedPolicies.filter((p) => p.categoryId === activeCluster?.id),
+    'newest'
+  );
 
   return (
     <section className="py-16 sm:py-20 bg-[#F8FAFC] border-b border-slate-200/80">
@@ -205,73 +222,82 @@ export const InstagramClusterShowcase: React.FC = () => {
               {/* Posts Grid with Instagram Embeds */}
               {clusterPosts.length > 0 ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8 items-start">
-                  {clusterPosts.map((post) => (
-                    <div
-                      key={post.id}
-                      className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs hover:shadow-[0_16px_32px_-12px_rgba(7,82,154,0.1)] hover:border-[#07529A]/30 transition-all duration-200 p-5 sm:p-6 space-y-4 overflow-hidden"
-                    >
-                      {/* Header info */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mb-1.5">
-                            <span className="font-semibold text-[#07529A]">
-                              {activeCluster.name}
-                            </span>
-                            <span aria-hidden="true">·</span>
-                            <span>{resolvePolicyReleaseDate(post)}</span>
+                  {clusterPosts.map((post) => {
+                    const media = resolvePolicyMedia(post);
+                    return (
+                      <div
+                        key={post.id}
+                        className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs hover:shadow-[0_16px_32px_-12px_rgba(7,82,154,0.1)] hover:border-[#07529A]/30 transition-all duration-200 p-5 sm:p-6 space-y-4 overflow-hidden"
+                      >
+                        {/* Header info */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 mb-1.5">
+                              <span className="font-semibold text-[#07529A]">
+                                {activeCluster.name}
+                              </span>
+                              <span aria-hidden="true">·</span>
+                              <span>{getPolicyDisplayDate(post)}</span>
+                            </div>
+                            <h4 className="font-bold text-slate-900 text-base sm:text-lg leading-snug">
+                              {post.title}
+                            </h4>
                           </div>
-                          <h4 className="font-bold text-slate-900 text-base sm:text-lg leading-snug">
-                            {post.title}
-                          </h4>
+                          <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-[#E1306C]">
+                            <Instagram className="w-3.5 h-3.5 shrink-0" />
+                            <span className="hidden sm:inline">Feed Resmi</span>
+                          </span>
                         </div>
-                        <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-[#E1306C]">
-                          <Instagram className="w-3.5 h-3.5 shrink-0" />
-                          <span className="hidden sm:inline">Feed Resmi</span>
-                        </span>
-                      </div>
 
-                      {post.summary && (
                         <p className="text-xs sm:text-[13px] text-slate-600 leading-relaxed line-clamp-2">
-                          {post.summary}
+                          {getPolicyAboutDescription(post).text}
                         </p>
-                      )}
 
-                      {/* Official Instagram Embed Container */}
-                      <div className="w-full flex justify-center py-2 bg-slate-50/70 rounded-2xl border border-slate-100 overflow-hidden">
-                        <InstagramEmbed
-                          url={post.instagramPostUrl}
+                        {/* Visual Media: Admin Image URL or Official Instagram Embed */}
+                        <PolicyMediaFrame
+                          policy={post}
                           clusterName={activeCluster.name}
-                          title={post.title}
-                          hideHeader={true}
+                          variant="card"
+                          onOpenDetail={() => navigateTo({ name: 'policy-detail', slug: post.slug })}
                         />
-                      </div>
 
-                      {/* Card Actions */}
-                      <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-                        <a
-                          href={post.instagramPostUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="group inline-flex items-center gap-1.5 text-slate-700 hover:text-[#07529A] font-semibold transition-colors whitespace-nowrap"
-                        >
-                          <Instagram className="w-3.5 h-3.5 text-[#E1306C] shrink-0" />
-                          <span>Buka di Instagram</span>
-                          <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-[#07529A] shrink-0" />
-                        </a>
+                        {/* Card Actions */}
+                        <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+                          {media.externalSourceUrl ? (
+                            <a
+                              href={media.externalSourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group inline-flex items-center gap-1.5 text-slate-700 hover:text-[#07529A] font-semibold transition-colors whitespace-nowrap"
+                            >
+                              <Instagram className="w-3.5 h-3.5 text-[#E1306C] shrink-0" />
+                              <span>
+                                {media.isInstagramSource
+                                  ? 'Buka di Instagram'
+                                  : 'Buka Sumber Konten'}
+                              </span>
+                              <ExternalLink className="w-3 h-3 text-slate-400 group-hover:text-[#07529A] shrink-0" />
+                            </a>
+                          ) : (
+                            <span className="text-[11px] text-slate-400 font-medium">
+                              Publikasi KOMPAK SDMA
+                            </span>
+                          )}
 
-                        <motion.button
-                          type="button"
-                          whileHover={{ y: -1 }}
-                          whileTap={{ scale: 0.98 }}
-                          onClick={() => navigateTo({ name: 'policy-detail', slug: post.slug })}
-                          className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#07529A] hover:bg-[#053d73] text-white rounded-xl font-bold shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                        >
-                          <BookOpen className="w-3.5 h-3.5 text-[#FFD84D] shrink-0" />
-                          <span>Penjelasan Regulasi</span>
-                        </motion.button>
+                          <motion.button
+                            type="button"
+                            whileHover={{ y: -1 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => navigateTo({ name: 'policy-detail', slug: post.slug })}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#07529A] hover:bg-[#053d73] text-white rounded-xl font-bold shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                          >
+                            <BookOpen className="w-3.5 h-3.5 text-[#FFD84D] shrink-0" />
+                            <span>Penjelasan Regulasi</span>
+                          </motion.button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : (
                 /* Empty state for cluster without posts */

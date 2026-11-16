@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { usePolicy } from '../context/PolicyContext';
 import { PolicyCard } from '../components/policy/PolicyCard';
+import { sortPoliciesByInputDate } from '../utils/dateUtils';
+import { getPolicyAboutDescription } from '../utils/policySummaryUtils';
 import { Search, ArrowLeft, Tag, Layers, X, ArrowRight } from 'lucide-react';
 import { motion } from 'motion/react';
 
@@ -21,18 +23,24 @@ export const SearchResultsPage: React.FC<SearchResultsPageProps> = ({ initialQue
   const normalized = query.trim().toLowerCase();
 
   const matchingPolicies = normalized
-    ? policies.filter((p) => {
-        const cat = categories.find((c) => c.id === p.categoryId);
-        return (
-          p.title.toLowerCase().includes(normalized) ||
-          p.summary.toLowerCase().includes(normalized) ||
-          (p.contextHeader && p.contextHeader.toLowerCase().includes(normalized)) ||
-          (p.contextExplanation && p.contextExplanation.toLowerCase().includes(normalized)) ||
-          (p.requirementsHeader && p.requirementsHeader.toLowerCase().includes(normalized)) ||
-          (p.processStepsHeader && p.processStepsHeader.toLowerCase().includes(normalized)) ||
-          (cat && cat.name.toLowerCase().includes(normalized))
-        );
-      })
+    ? sortPoliciesByInputDate(
+        policies.filter((p) => {
+          if (p.status !== 'published') return false;
+          const cat = categories.find((c) => c.id === p.categoryId);
+          const aboutText = getPolicyAboutDescription(p).text;
+          return (
+            p.title.toLowerCase().includes(normalized) ||
+            p.summary.toLowerCase().includes(normalized) ||
+            aboutText.toLowerCase().includes(normalized) ||
+            (p.contextHeader && p.contextHeader.toLowerCase().includes(normalized)) ||
+            (p.contextExplanation && p.contextExplanation.toLowerCase().includes(normalized)) ||
+            (p.requirementsHeader && p.requirementsHeader.toLowerCase().includes(normalized)) ||
+            (p.processStepsHeader && p.processStepsHeader.toLowerCase().includes(normalized)) ||
+            (cat && cat.name.toLowerCase().includes(normalized))
+          );
+        }),
+        'newest'
+      )
     : [];
 
   const matchingCategories = normalized

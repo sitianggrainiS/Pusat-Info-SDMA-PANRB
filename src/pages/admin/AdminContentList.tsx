@@ -2,18 +2,38 @@ import React, { useState, useRef } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Policy, PolicyStatus } from '../../types';
-import {
-  InstagramEmbed,
-  extractInstagramInfo,
-  resolvePolicyReleaseDate,
-} from '../../components/common/InstagramEmbed';
+import { InstagramEmbed, extractInstagramInfo } from '../../components/common/InstagramEmbed';
 import { CategoryIcon } from '../../components/common/CategoryIcon';
 import {
   detectInstagramThumbnail,
-  AVAILABLE_INSTAGRAM_PREVIEWS,
-  compressImageFile,
+  compressImageForFirestore,
 } from '../../utils/thumbnailUtils';
 import {
+  isTemporaryRuntimeUploadUrl,
+  normalizeStaticImageUrl,
+} from '../../data/staticImages';
+import {
+  StaticAssetPicker,
+  UploadLimitationNotice,
+} from '../../components/admin/StaticAssetPicker';
+import {
+  UrlImagePreviewStatus,
+  ImagePreviewLoadState,
+} from '../../components/admin/UrlImagePreviewStatus';
+import { PolicyMediaFrame } from '../../components/policy/PolicyMediaFrame';
+import {
+  validateDirectImageUrl,
+  resolvePolicyMedia,
+} from '../../utils/imageUrlUtils';
+import { CalendarDatePicker } from '../../components/common/CalendarDatePicker';
+import {
+  formatContentDate,
+  getPolicyDisplayDate,
+  getTodayIndonesianDate,
+  sortPoliciesByInputDate,
+} from '../../utils/dateUtils';
+import {
+  ArrowUpDown,
   Plus,
   Search,
   Filter,
@@ -72,6 +92,7 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
 
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterCluster, setFilterCluster] = useState<string>('all');
+  const [sortDateOrder, setSortDateOrder] = useState<'newest' | 'oldest'>('newest');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals state
@@ -83,6 +104,7 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
   const [editingThumbnailPolicy, setEditingThumbnailPolicy] = useState<Policy | null>(null);
   const [modalThumbnailMode, setModalThumbnailMode] = useState<'auto' | 'manual'>('auto');
   const [modalSelectedThumbnail, setModalSelectedThumbnail] = useState<string>('');
+  const [modalThumbLoadState, setModalThumbLoadState] = useState<ImagePreviewLoadState>('idle');
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -90,37 +112,55 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
 
   // Quick Add Form state
   const [quickUrl, setQuickUrl] = useState('');
+  const [quickImageUrl, setQuickImageUrl] = useState('');
+  const [quickThumbLoadState, setQuickThumbLoadState] = useState<ImagePreviewLoadState>('idle');
   const [quickClusterId, setQuickClusterId] = useState(categories[0]?.id || '');
   const [quickTitle, setQuickTitle] = useState('');
+  const [quickDate, setQuickDate] = useState<string>(() => getTodayIndonesianDate());
   const [quickStatus, setQuickStatus] = useState<PolicyStatus>('published');
   const [quickError, setQuickError] = useState<string | null>(null);
+  const [isSavingQuick, setIsSavingQuick] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [isSavingThumb, setIsSavingThumb] = useState(false);
+
+  React.useEffect(() => {
+    if (!quickClusterId && categories.length > 0) {
+      setQuickClusterId(categories[0].id);
+    }
+  }, [quickClusterId, categories]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const filtered = policies.filter((p) => {
-    const matchStatus = filterStatus === 'all' || p.status === filterStatus;
-    const matchCluster = filterCluster === 'all' || p.categoryId === filterCluster;
-    const q = searchQuery.toLowerCase().trim();
-    const matchSearch =
-      !q ||
-      p.title.toLowerCase().includes(q) ||
-      p.summary.toLowerCase().includes(q) ||
-      (p.instagramPostUrl && p.instagramPostUrl.toLowerCase().includes(q));
-    return matchStatus && matchCluster && matchSearch;
-  });
+  const filtered = sortPoliciesByInputDate(
+    policies.filter((p) => {
+      const matchStatus = filterStatus === 'all' || p.status === filterStatus;
+      const matchCluster = filterCluster === 'all' || p.categoryId === filterCluster;
+      const q = searchQuery.toLowerCase().trim();
+      const matchSearch =
+        !q ||
+        p.title.toLowerCase().includes(q) ||
+        p.summary.toLowerCase().includes(q) ||
+        (p.instagramPostUrl && p.instagramPostUrl.toLowerCase().includes(q));
+      return matchStatus && matchCluster && matchSearch;
+    }),
+    sortDateOrder
+  );
 
   const confirmDeletePolicy = async () => {
     if (!deletingPolicy) return;
     try {
+      setIsDeleting(true);
       await deletePolicy(deletingPolicy.id);
       setDeletingPolicy(null);
-      showToast('Konten berhasil dihapus dari Cloud Firestore.');
+      showToast('Konten berhasil dihapus secara permanen dari Firestore.');
     } catch (err: any) {
+      showToast(err?.message || 'Gagal menghapus konten dari Firestore.');
       setDeletingPolicy(null);
-      showToast(err?.message || 'Gagal menghapus konten dari Cloud Firestore.');
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -130,28 +170,62 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
       await setPolicyStatus(id, nextStatus);
       showToast(`Status berhasil diubah menjadi ${nextStatus === 'published' ? 'Terbit' : 'Draf'}.`);
     } catch (err: any) {
-      showToast(err?.message || 'Gagal memperbarui status di Cloud Firestore.');
+      showToast(err?.message || 'Gagal mengubah status konten di Firestore.');
     }
   };
 
   const handleQuickAdd = async () => {
-    const trimmed = quickUrl.trim();
-    if (!trimmed) {
-      setQuickError('Tautan postingan Instagram wajib diisi.');
+    const trimmedIg = quickUrl.trim();
+    const trimmedImg = quickImageUrl.trim();
+
+    if (!trimmedIg && !trimmedImg) {
+      setQuickError(
+        'Masukkan minimal URL Postingan Instagram atau URL Gambar Konten.'
+      );
       return;
     }
 
-    const check = extractInstagramInfo(trimmed);
-    if (!check.isValid) {
-      setQuickError('Masukkan URL postingan, karusel, atau Reel Instagram yang valid.');
-      return;
+    let cleanIgUrl = '';
+    if (trimmedIg) {
+      const check = extractInstagramInfo(trimmedIg);
+      if (!check.isValid) {
+        setQuickError(
+          'Format URL Postingan Instagram tidak valid. Gunakan tautan /p/..., /reel/..., atau kosongkan jika hanya memakai URL Gambar.'
+        );
+        return;
+      }
+      cleanIgUrl = check.cleanUrl;
+    }
+
+    let normalizedCustomImg = '';
+    if (trimmedImg) {
+      const imgCheck = validateDirectImageUrl(trimmedImg, {
+        allowEmpty: false,
+      });
+      if (!imgCheck.isValid) {
+        setQuickError(imgCheck.error || 'URL Gambar Konten tidak valid.');
+        return;
+      }
+      if (quickThumbLoadState === 'error') {
+        setQuickError(
+          'URL Gambar Konten gagal dimuat oleh browser. Pastikan URL mengarah langsung ke file gambar yang aktif.'
+        );
+        return;
+      }
+      normalizedCustomImg = imgCheck.cleanUrl;
     }
 
     if (!quickClusterId) {
-      setQuickError('Pilih salah satu dari 8 Klaster Manajemen ASN.');
+      setQuickError('Pilih salah satu Klaster Manajemen ASN atau Pilar Konten.');
       return;
     }
 
+    if (!quickDate.trim()) {
+      setQuickError('Tanggal publikasi konten wajib diisi.');
+      return;
+    }
+
+    const finalQuickDate = formatContentDate(quickDate.trim());
     const titleToUse = quickTitle.trim() || 'Edukasi Kebijakan SDM Aparatur';
     const slug =
       titleToUse
@@ -163,11 +237,14 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
     const detectedThumb = detectInstagramThumbnail({
       title: titleToUse,
       slug,
-      instagramPostUrl: check.cleanUrl,
+      instagramPostUrl: cleanIgUrl,
       categoryId: quickClusterId,
     });
+    const finalThumb = normalizedCustomImg || detectedThumb;
 
     try {
+      setIsSavingQuick(true);
+      setQuickError(null);
       await createPolicy({
         title: titleToUse,
         slug,
@@ -175,36 +252,34 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
         summary:
           'Materi edukasi kebijakan SDM Aparatur yang bersumber dari media sosial resmi KemenPANRB.',
         status: quickStatus,
-        thumbnail: detectedThumb,
-        instagramPostUrl: check.cleanUrl,
+        thumbnail: finalThumb,
+        customThumbnail: normalizedCustomImg || undefined,
+        instagramPostUrl: cleanIgUrl,
         instagramThumbnail: detectedThumb,
-        isCustomThumbnail: false,
+        isCustomThumbnail: Boolean(normalizedCustomImg),
         autoThumbnail: detectedThumb,
-        instagramDate:
-          check.detectedDate ||
-          new Date().toLocaleDateString('id-ID', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          }),
-        instagramAccountHandle: check.accountHandle || '@sdmapanrb',
-        publicationDate:
-          check.detectedDate ||
-          new Date().toLocaleDateString('id-ID', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          }),
+        instagramDate: finalQuickDate,
+        instagramAccountHandle: '@sdmapanrb',
+        publicationDate: finalQuickDate,
       });
 
       // Reset and close
       setQuickUrl('');
+      setQuickImageUrl('');
+      setQuickThumbLoadState('idle');
       setQuickTitle('');
+      setQuickDate(getTodayIndonesianDate());
       setQuickError(null);
       setQuickAddOpen(false);
-      showToast('Konten baru berhasil disimpan ke Cloud Firestore.');
+      showToast(
+        normalizedCustomImg
+          ? 'Konten baru berhasil disimpan ke Firestore dengan URL gambar pilihan Admin.'
+          : 'Konten baru berhasil disimpan ke Cloud Firestore.'
+      );
     } catch (err: any) {
       setQuickError(err?.message || 'Gagal menyimpan konten ke Cloud Firestore.');
+    } finally {
+      setIsSavingQuick(false);
     }
   };
 
@@ -213,7 +288,8 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
     setEditingThumbnailPolicy(policy);
     const isCustom = Boolean(policy.isCustomThumbnail);
     setModalThumbnailMode(isCustom ? 'manual' : 'auto');
-    setModalSelectedThumbnail(policy.thumbnail);
+    setModalSelectedThumbnail(policy.customThumbnail || policy.thumbnail || '');
+    setModalThumbLoadState('idle');
     setUploadError(null);
   };
 
@@ -230,16 +306,13 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
     try {
       setIsUploading(true);
       setUploadError(null);
-      const uploadedUrl = await compressImageFile(file);
-      setModalSelectedThumbnail(uploadedUrl);
+      const compressed = await compressImageForFirestore(file);
+      setModalSelectedThumbnail(compressed);
       setModalThumbnailMode('manual');
+      setModalThumbLoadState('loaded');
     } catch (err) {
       console.error('Failed to process image upload', err);
-      setUploadError(
-        err instanceof Error
-          ? err.message
-          : 'Gagal memproses gambar. Gunakan URL gambar eksternal (https://...) atau cover bawaan.'
-      );
+      setUploadError('Gagal memproses gambar. Silakan coba file lain.');
     } finally {
       setIsUploading(false);
       if (thumbnailFileInputRef.current) {
@@ -253,25 +326,56 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
     if (!editingThumbnailPolicy) return;
 
     const detected = detectInstagramThumbnail(editingThumbnailPolicy);
+
+    if (modalThumbnailMode === 'manual') {
+      const rawManual = modalSelectedThumbnail.trim();
+      if (!rawManual) {
+        setUploadError('Masukkan URL gambar atau pilih gambar dari Aset Proyek terlebih dahulu.');
+        return;
+      }
+
+      if (!rawManual.startsWith('data:image/')) {
+        const check = validateDirectImageUrl(rawManual, {
+          allowEmpty: false,
+        });
+        if (!check.isValid) {
+          setUploadError(check.error || 'URL gambar tidak valid.');
+          return;
+        }
+        if (modalThumbLoadState === 'error') {
+          setUploadError(
+            'URL gambar gagal dimuat. Periksa kembali tautan gambar sebelum menyimpan.'
+          );
+          return;
+        }
+      }
+    }
+
     const finalThumb =
       modalThumbnailMode === 'auto'
         ? detected
-        : modalSelectedThumbnail || detected;
+        : modalSelectedThumbnail.startsWith('data:image/')
+        ? modalSelectedThumbnail
+        : normalizeStaticImageUrl(modalSelectedThumbnail.trim()) || detected;
 
     try {
+      setIsSavingThumb(true);
+      setUploadError(null);
       await updatePolicyThumbnail(
         editingThumbnailPolicy.id,
         finalThumb,
         modalThumbnailMode === 'manual'
       );
 
-      const savedTitle = editingThumbnailPolicy.title;
+      const policyTitle = editingThumbnailPolicy.title;
       setEditingThumbnailPolicy(null);
       showToast(
-        `Thumbnail untuk "${savedTitle}" berhasil diperbarui di Cloud Firestore!`
+        `Gambar cover untuk "${policyTitle}" berhasil diperbarui ke Cloud Firestore & halaman publik!`
       );
     } catch (err: any) {
-      setUploadError(err?.message || 'Gagal memperbarui thumbnail di Cloud Firestore.');
+      setUploadError(err?.message || 'Gagal memperbarui thumbnail ke Cloud Firestore.');
+    } finally {
+      setIsSavingThumb(false);
     }
   };
 
@@ -404,8 +508,11 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                 onClick={() => {
                   setQuickAddOpen(true);
                   setQuickUrl('https://www.instagram.com/p/Ddi76RtGXeH/');
+                  setQuickImageUrl('');
+                  setQuickThumbLoadState('idle');
                   setQuickClusterId(categories[0]?.id || '');
                   setQuickTitle('Panduan Kebijakan SDM Aparatur');
+                  setQuickDate(getTodayIndonesianDate());
                   setQuickError(null);
                 }}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2.5 bg-gradient-to-r from-purple-600 via-pink-600 to-amber-500 hover:opacity-95 text-white text-xs font-bold rounded-xl transition-all cursor-pointer shadow-xs"
@@ -465,8 +572,8 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
               )}
             </div>
 
-            {/* Cluster / Pillar Selector Filter */}
-            <div className="flex items-center gap-2 shrink-0">
+            {/* Cluster / Pillar & Date Sort Selector Filter */}
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
               <span className="text-xs text-slate-500 font-medium hidden sm:inline">Topik:</span>
               <select
                 value={filterCluster}
@@ -495,35 +602,95 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                   </optgroup>
                 )}
               </select>
+
+              <div className="inline-flex items-center gap-1.5">
+                <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 shrink-0 hidden sm:inline" />
+                <select
+                  value={sortDateOrder}
+                  onChange={(e) => setSortDateOrder(e.target.value as 'newest' | 'oldest')}
+                  aria-label="Urutan Tanggal Input"
+                  className="text-xs px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 focus:outline-none focus:border-[#07529A]"
+                >
+                  <option value="newest">Tanggal: Terbaru</option>
+                  <option value="oldest">Tanggal: Terlama</option>
+                </select>
+              </div>
             </div>
           </div>
 
-          {/* Status Filter Tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pt-2 border-t border-slate-100">
-            {[
-              { id: 'all', label: `Semua Konten (${policies.length})` },
-              {
-                id: 'published',
-                label: `Terbit (${policies.filter((p) => p.status === 'published').length})`,
-              },
-              {
-                id: 'draft',
-                label: `Draf (${policies.filter((p) => p.status === 'draft').length})`,
-              },
-            ].map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => setFilterStatus(tab.id)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-                  filterStatus === tab.id
-                    ? 'bg-[#07529A] text-white shadow-xs'
-                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
+          {/* Status Filter Tabs & Pilar Konten Quick Filters */}
+          <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+            <div className="flex items-center gap-1.5 overflow-x-auto">
+              {[
+                { id: 'all', label: `Semua Konten (${policies.length})` },
+                {
+                  id: 'published',
+                  label: `Terbit (${policies.filter((p) => p.status === 'published').length})`,
+                },
+                {
+                  id: 'draft',
+                  label: `Draf (${policies.filter((p) => p.status === 'draft').length})`,
+                },
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setFilterStatus(tab.id)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
+                    filterStatus === tab.id
+                      ? 'bg-[#07529A] text-white shadow-xs'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {categories.some((c) => c.group === 'pilar') && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] font-bold text-slate-500 mr-0.5">
+                  Pilar Konten:
+                </span>
+                {categories
+                  .filter((c) => c.group === 'pilar')
+                  .map((pilar) => {
+                    const pilarCount = policies.filter((p) => p.categoryId === pilar.id).length;
+                    const isPilarActive = filterCluster === pilar.id;
+                    return (
+                      <button
+                        key={pilar.id}
+                        type="button"
+                        onClick={() =>
+                          setFilterCluster((prev) => (prev === pilar.id ? 'all' : pilar.id))
+                        }
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border whitespace-nowrap ${
+                          isPilarActive
+                            ? 'bg-[#07529A] text-white border-[#07529A] shadow-xs'
+                            : 'bg-blue-50/60 hover:bg-blue-100/70 text-[#07529A] border-blue-200/80'
+                        }`}
+                      >
+                        <CategoryIcon
+                          name={pilar.iconName}
+                          className={`w-3.5 h-3.5 shrink-0 ${
+                            isPilarActive ? 'text-[#FFD84D]' : 'text-[#07529A]'
+                          }`}
+                        />
+                        <span>{pilar.name}</span>
+                        <span
+                          className={`text-[10px] font-mono tabular-nums px-1.5 py-0.2 rounded ${
+                            isPilarActive
+                              ? 'bg-white/20 text-white'
+                              : 'bg-white text-slate-600 border border-blue-100'
+                          }`}
+                        >
+                          {pilarCount}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -546,7 +713,9 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                   {filtered.map((pol) => {
                     const cat = categories.find((c) => c.id === pol.categoryId);
                     const isCustom = Boolean(pol.isCustomThumbnail);
+                    const resolvedMedia = resolvePolicyMedia(pol);
                     const thumbSrc =
+                      resolvedMedia.imageUrl ||
                       pol.thumbnail ||
                       pol.instagramThumbnail ||
                       detectInstagramThumbnail(pol);
@@ -564,6 +733,13 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                             <img
                               src={thumbSrc}
                               alt={pol.title}
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                if (e.currentTarget.dataset.fallbackApplied !== '1') {
+                                  e.currentTarget.dataset.fallbackApplied = '1';
+                                  e.currentTarget.src = detectInstagramThumbnail(pol);
+                                }
+                              }}
                               className="w-full h-full object-cover group-hover/thumb:scale-105 transition-transform"
                             />
                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/thumb:opacity-100 transition-opacity flex items-center justify-center text-white">
@@ -621,9 +797,9 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                           )}
                         </td>
 
-                        {/* Cluster Badge */}
+                        {/* Cluster / Pillar Badge */}
                         <td className="py-4 px-4">
-                          <div className="flex items-center gap-1.5 font-medium text-slate-800 text-xs">
+                          <div className="flex flex-wrap items-center gap-1.5 font-medium text-slate-800 text-xs">
                             <CategoryIcon
                               name={cat?.iconName || 'FileText'}
                               className="w-3.5 h-3.5 text-[#07529A] shrink-0"
@@ -631,6 +807,11 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                             <span className="font-semibold text-[#07529A]">
                               {cat?.name || 'Belum Ditetapkan'}
                             </span>
+                            {cat?.group === 'pilar' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200/80">
+                                Pilar Konten
+                              </span>
+                            )}
                           </div>
                           <p className="text-[10px] text-slate-400 line-clamp-1 mt-0.5">
                             {cat?.description}
@@ -664,9 +845,9 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                         </td>
 
                         {/* Date */}
-                        <td className="py-4 px-4 text-slate-600">
-                          <div className="text-xs font-medium text-slate-800">
-                            {resolvePolicyReleaseDate(pol)}
+                        <td className="py-4 px-4 text-slate-600 whitespace-nowrap">
+                          <div className="text-xs font-medium text-slate-800 tabular-nums">
+                            {getPolicyDisplayDate(pol)}
                           </div>
                           <div className="text-[10px] text-slate-400">
                             {pol.instagramAccountHandle || '@sdmapanrb'}
@@ -908,82 +1089,76 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                 })()}
               </div>
 
-              {/* Gallery of Available Instagram Slide Covers */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs font-bold text-slate-800">
-                  <span>Pilihan Slide & Cover Instagram Resmi:</span>
-                  <span className="text-[10px] text-slate-400 font-normal">
-                    Klik cover untuk memilih
-                  </span>
-                </div>
+              {/* Gallery of Permanent Project Static Assets (/images/...) */}
+              <StaticAssetPicker
+                selectedUrl={modalSelectedThumbnail}
+                onSelect={(assetPath) => {
+                  setModalSelectedThumbnail(assetPath);
+                  setModalThumbnailMode('manual');
+                }}
+              />
 
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                  {AVAILABLE_INSTAGRAM_PREVIEWS.map((item) => {
-                    const isSelected = modalSelectedThumbnail === item.url;
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => {
-                          setModalSelectedThumbnail(item.url);
-                          setModalThumbnailMode('manual');
-                        }}
-                        className={`group relative rounded-xl overflow-hidden border p-1 text-left transition-all cursor-pointer ${
-                          isSelected
-                            ? 'border-[#07529A] ring-2 ring-[#07529A] bg-blue-50/50 shadow-xs'
-                            : 'border-slate-200 hover:border-slate-300 bg-white'
-                        }`}
-                      >
-                        <div className="aspect-4/3 w-full rounded-lg overflow-hidden bg-slate-100 relative">
-                          <img
-                            src={item.url}
-                            alt={item.name}
-                            className="w-full h-full object-cover group-hover:scale-103 transition-transform"
-                          />
-                          {isSelected && (
-                            <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#07529A] text-white flex items-center justify-center shadow-xs">
-                              <Check className="w-2.5 h-2.5" />
-                            </div>
-                          )}
-                        </div>
-                        <p className="text-[9px] font-bold text-slate-900 mt-1 line-clamp-1">
-                          {item.name}
-                        </p>
-                      </button>
-                    );
-                  })}
-                </div>
+              {/* Direct Static Path (/images/...) or External URL Input */}
+              <div className="space-y-2">
+                <label className="block text-xs font-bold text-slate-800">
+                  Masukkan URL Gambar (https://...) atau Path Aset Proyek (/images/...):
+                </label>
+                <input
+                  type="text"
+                  value={modalSelectedThumbnail.startsWith('data:image/') ? '' : modalSelectedThumbnail}
+                  onChange={(e) => {
+                    setModalSelectedThumbnail(normalizeStaticImageUrl(e.target.value));
+                    setModalThumbnailMode('manual');
+                    setUploadError(null);
+                  }}
+                  placeholder="https://contoh-domain.go.id/gambar.jpg atau /images/nama-gambar.jpg"
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-slate-300 bg-white focus:border-[#07529A] focus:outline-none"
+                />
+                {modalThumbnailMode === 'manual' &&
+                  modalSelectedThumbnail.trim() &&
+                  !modalSelectedThumbnail.startsWith('data:image/') && (
+                    <UrlImagePreviewStatus
+                      imageUrl={modalSelectedThumbnail}
+                      label="Verifikasi & Pratinjau URL Gambar"
+                      aspectClassName="aspect-4/3 max-w-xs"
+                      onStatusChange={(st) => setModalThumbLoadState(st)}
+                    />
+                  )}
               </div>
 
-              {/* Upload Image from Device */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#07529A] flex items-center justify-center shrink-0">
-                    <Upload className="w-4 h-4" />
+              {/* Upload Image from Device (Temporary Browser Preview Only) */}
+              <div className="space-y-2">
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-blue-50 text-[#07529A] flex items-center justify-center shrink-0">
+                      <Upload className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="font-bold text-slate-800 block text-xs">
+                        Unggah File Foto dari Perangkat (Disimpan ke Firestore)
+                      </span>
+                      <span className="text-[10px] text-slate-500">
+                        File akan dikompresi otomatis & disimpan permanen ke Cloud Firestore lintas perangkat
+                      </span>
+                    </div>
                   </div>
-                  <div>
-                    <span className="font-bold text-slate-800 block text-xs">
-                      Unggah File Foto / Gambar Baru
-                    </span>
-                    <span className="text-[10px] text-slate-500">
-                      Mendukung JPG, PNG, WEBP dari HP atau Laptop
-                    </span>
-                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => thumbnailFileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-300 text-slate-800 rounded-xl font-bold text-xs shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                  >
+                    {isUploading ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#07529A]" />
+                    ) : (
+                      <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+                    )}
+                    <span>{isUploading ? 'Memproses...' : 'Pilih Foto'}</span>
+                  </button>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => thumbnailFileInputRef.current?.click()}
-                  disabled={isUploading}
-                  className="px-3 py-1.5 bg-[#07529A] hover:bg-[#053d73] text-white rounded-xl font-bold text-xs shadow-xs transition-colors cursor-pointer inline-flex items-center gap-1.5"
-                >
-                  {isUploading ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <FolderOpen className="w-3.5 h-3.5" />
-                  )}
-                  <span>{isUploading ? 'Memproses...' : 'Pilih Foto'}</span>
-                </button>
+                <UploadLimitationNotice isTemporaryActive={false} />
               </div>
 
               {uploadError && (
@@ -1004,6 +1179,7 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                           : modalSelectedThumbnail || editingThumbnailPolicy.thumbnail
                       }
                       alt="Pratinjau Publik"
+                      referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                     />
                   </div>
@@ -1034,11 +1210,16 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                 </button>
                 <button
                   type="button"
+                  disabled={isUploading || isSavingThumb}
                   onClick={handleSaveThumbnailModal}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Simpan Perubahan Thumbnail</span>
+                  {isSavingThumb ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isSavingThumb ? 'Menyimpan...' : 'Simpan Perubahan Thumbnail'}</span>
                 </button>
               </div>
             </div>
@@ -1063,7 +1244,11 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                   <div>
                     <h3 className="font-bold text-sm text-slate-900">{previewPolicy.title}</h3>
                     <p className="text-[11px] text-slate-500">
-                      Klaster: {categories.find((c) => c.id === previewPolicy.categoryId)?.name}
+                      {categories.find((c) => c.id === previewPolicy.categoryId)?.group === 'pilar'
+                        ? 'Pilar Konten'
+                        : 'Klaster'}
+                      : {categories.find((c) => c.id === previewPolicy.categoryId)?.name} ·{' '}
+                      {getPolicyDisplayDate(previewPolicy)}
                     </p>
                   </div>
                 </div>
@@ -1076,15 +1261,14 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                 </button>
               </div>
 
-              {/* Embed Box */}
-              <div className="w-full flex justify-center py-2 bg-slate-50 rounded-2xl">
-                <InstagramEmbed
-                  url={previewPolicy.instagramPostUrl}
-                  thumbnail={previewPolicy.thumbnail}
-                  clusterName={categories.find((c) => c.id === previewPolicy.categoryId)?.name}
-                  title={previewPolicy.title}
-                  hideHeader={true}
-                />
+              {/* Public Media Frame Preview Box */}
+              <div className="w-full flex justify-center py-2 bg-slate-50 rounded-2xl px-2">
+                <div className="w-full max-w-md">
+                  <PolicyMediaFrame
+                    policy={previewPolicy}
+                    clusterName={categories.find((c) => c.id === previewPolicy.categoryId)?.name}
+                  />
+                </div>
               </div>
 
               {/* Modal Footer */}
@@ -1130,7 +1314,7 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                   <div>
                     <h3 className="font-bold text-sm text-slate-900">Tambah Cepat Konten Instagram</h3>
                     <p className="text-[11px] text-slate-500">
-                      Tempel tautan postingan Instagram dan tentukan klaster ASN.
+                      Tempel tautan postingan Instagram dan tentukan klaster ASN atau pilar konten.
                     </p>
                   </div>
                 </div>
@@ -1153,7 +1337,7 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
               <div className="space-y-3.5 text-xs">
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    URL Postingan Instagram *
+                    URL Postingan Instagram (Untuk Embed Postingan / Reel)
                   </label>
                   <input
                     type="url"
@@ -1162,9 +1346,33 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                       setQuickUrl(e.target.value);
                       setQuickError(null);
                     }}
-                    placeholder="https://www.instagram.com/p/Ddi76RtGXeH/"
+                    placeholder="https://www.instagram.com/p/Ddi76RtGXeH/ (opsional jika mengisi URL gambar)"
                     className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-[#07529A] focus:outline-none"
                   />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    URL Gambar Konten / Cover (Tampil Langsung di Kartu Publik)
+                  </label>
+                  <input
+                    type="text"
+                    value={quickImageUrl}
+                    onChange={(e) => {
+                      setQuickImageUrl(normalizeStaticImageUrl(e.target.value));
+                      setQuickError(null);
+                    }}
+                    placeholder="https://contoh-domain.go.id/gambar.jpg atau /images/nama-gambar.jpg"
+                    className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-[#07529A] focus:outline-none"
+                  />
+                  {quickImageUrl.trim() && (
+                    <UrlImagePreviewStatus
+                      imageUrl={quickImageUrl}
+                      label="Pratinjau & Verifikasi URL Gambar"
+                      aspectClassName="aspect-4/3 max-w-xs"
+                      onStatusChange={(st) => setQuickThumbLoadState(st)}
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -1212,39 +1420,45 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                   />
                 </div>
 
-                {/* Auto detected thumbnail preview in quick add */}
-                {(() => {
-                  const detected = detectInstagramThumbnail({
-                    title: quickTitle,
-                    instagramPostUrl: quickUrl,
-                    categoryId: quickClusterId,
-                  });
-                  return (
-                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-3">
-                      <div className="w-12 h-9 rounded-lg overflow-hidden border border-slate-300 bg-slate-200 shrink-0">
-                        <img
-                          src={detected}
-                          alt="Cover Terdeteksi"
-                          className="w-full h-full object-cover"
-                        />
+                <div>
+                  <CalendarDatePicker
+                    value={quickDate}
+                    onChange={(val) => {
+                      setQuickDate(val);
+                      if (quickError) setQuickError(null);
+                    }}
+                    label="Tanggal Publikasi Konten *"
+                  />
+                </div>
+
+                {/* Auto detected thumbnail preview in quick add when no custom URL is entered */}
+                {!quickImageUrl.trim() &&
+                  (() => {
+                    const detected = detectInstagramThumbnail({
+                      title: quickTitle,
+                      instagramPostUrl: quickUrl,
+                      categoryId: quickClusterId,
+                    });
+                    return (
+                      <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center gap-3">
+                        <div className="w-12 h-9 rounded-lg overflow-hidden border border-slate-300 bg-slate-200 shrink-0">
+                          <img
+                            src={detected}
+                            alt="Cover Terdeteksi"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-[10px] font-bold text-[#07529A] block">
+                            Mode Embed Instagram Aktif
+                          </span>
+                          <span className="text-[10px] text-slate-500 block truncate">
+                            Isi kolom URL Gambar di atas jika ingin menampilkan foto cover pilihan sendiri.
+                          </span>
+                        </div>
                       </div>
-                      <div className="min-w-0 flex-1">
-                        <span className="text-[10px] font-bold text-[#07529A] block">
-                          Cover Otomatis Terdeteksi
-                        </span>
-                        <span className="text-[10px] text-slate-500 block truncate">
-                          {detected.includes('jabatan_pelaksana')
-                            ? 'Cover: JABATAN PELAKSANA'
-                            : detected.includes('naik_pangkat')
-                            ? 'Cover: NAIK PANGKAT ≠ NAIK JENJANG'
-                            : detected.includes('manajemen_talenta')
-                            ? 'Cover: MANAJEMEN TALENTA & SISTEM MERIT'
-                            : 'Cover Instagram'}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })()}
+                    );
+                  })()}
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -1288,11 +1502,16 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                 </button>
                 <button
                   type="button"
+                  disabled={isSavingQuick}
                   onClick={handleQuickAdd}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>Simpan Konten</span>
+                  {isSavingQuick ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Save className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isSavingQuick ? 'Menyimpan...' : 'Simpan Konten'}</span>
                 </button>
               </div>
             </div>
@@ -1341,11 +1560,16 @@ export const AdminContentList: React.FC<AdminContentListProps> = ({ initialTab }
                 </button>
                 <button
                   type="button"
+                  disabled={isDeleting}
                   onClick={confirmDeletePolicy}
-                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Hapus Konten</span>
+                  {isDeleting ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="w-3.5 h-3.5" />
+                  )}
+                  <span>{isDeleting ? 'Menghapus...' : 'Hapus Konten'}</span>
                 </button>
               </div>
             </div>

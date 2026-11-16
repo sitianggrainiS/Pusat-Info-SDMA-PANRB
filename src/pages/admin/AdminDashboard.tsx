@@ -1,8 +1,9 @@
 import React from 'react';
 import { usePolicy } from '../../context/PolicyContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
+import { DataStorageManager } from '../../components/admin/DataStorageManager';
 import { ROLE_DEFINITIONS } from '../../data/adminUsers';
-import { resolvePolicyReleaseDate } from '../../utils/instagramUtils';
+import { getPolicyDisplayDate, sortPoliciesByInputDate } from '../../utils/dateUtils';
 import {
   FileCheck2,
   Tags,
@@ -148,6 +149,9 @@ export const AdminDashboard: React.FC = () => {
           </motion.button>
         </div>
 
+        {/* Permanent Repository Storage & Backup Management */}
+        <DataStorageManager />
+
         {/* Recently Updated Policies Table */}
         <div className="bg-white rounded-2xl border border-slate-200/90 shadow-2xs overflow-hidden">
           <div className="px-5 sm:px-6 py-4 border-b border-slate-200/80 flex items-center justify-between gap-2">
@@ -175,8 +179,10 @@ export const AdminDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {policies.slice(0, 5).map((pol) => {
-                  const cat = categories.find((c) => c.id === pol.categoryId);
+                {sortPoliciesByInputDate(policies, 'newest')
+                  .slice(0, 5)
+                  .map((pol) => {
+                    const cat = categories.find((c) => c.id === pol.categoryId);
                   return (
                     <tr key={pol.id} className="hover:bg-slate-50/80 transition-colors">
                       <td className="py-3.5 px-5 sm:px-6 font-semibold text-slate-900 max-w-xs truncate">
@@ -206,7 +212,7 @@ export const AdminDashboard: React.FC = () => {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-slate-500 tabular-nums whitespace-nowrap">
-                        {resolvePolicyReleaseDate(pol)}
+                        {getPolicyDisplayDate(pol)}
                       </td>
                       <td className="py-3.5 px-5 sm:px-6 text-right space-x-1.5 whitespace-nowrap">
                         <button

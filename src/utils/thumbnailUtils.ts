@@ -1,5 +1,9 @@
 import { Policy } from '../types';
-import { StorageFolder, uploadImageAsset } from '../lib/storageService';
+import {
+  DEFAULT_FALLBACK_IMAGE_PATH,
+  normalizeStaticImageUrl,
+  readAndCompressLocalPreviewImage,
+} from '../data/staticImages';
 
 export interface InstagramPreviewOption {
   id: string;
@@ -15,41 +19,49 @@ export const AVAILABLE_INSTAGRAM_PREVIEWS: InstagramPreviewOption[] = [
     name: 'Cover: JABATAN PELAKSANA',
     badge: 'Cover Utama',
     description: 'Cover resmi infografis pengenalan dan klasifikasi Jabatan Pelaksana KemenPANRB',
-    url: '/src/assets/images/infographic_jabatan_pelaksana_1790755819303.jpg',
+    url: '/images/infographic_jabatan_pelaksana_1790755819303.jpg',
   },
   {
     id: 'naik-pangkat',
     name: 'Cover: NAIK PANGKAT ≠ NAIK JENJANG',
     badge: 'Cover Utama',
     description: 'Cover resmi infografis perbedaan naik pangkat dan naik jenjang Jabatan Fungsional',
-    url: '/src/assets/images/infographic_naik_pangkat_1790755802597.jpg',
+    url: '/images/infographic_naik_pangkat_1790755802597.jpg',
   },
   {
     id: 'manajemen-talenta',
     name: 'Cover: MANAJEMEN TALENTA & SISTEM MERIT',
     badge: 'Cover Utama',
     description: 'Cover resmi infografis 9-Box Matrix dan percepatan suksesi ASN',
-    url: '/src/assets/images/infographic_manajemen_talenta_1790755861584.jpg',
+    url: '/images/infographic_manajemen_talenta_1790755861584.jpg',
   },
   {
     id: 'pola-karier',
     name: 'Slide: POLA KARIER PEGAWAI NEGERI SIPIL',
     badge: 'Slide Infografis',
     description: 'Slide ilustrasi jalur pengembangan dan mobilitas karier ASN',
-    url: '/src/assets/images/pola_karier_pns_slide_1791792629283.jpg',
+    url: '/images/pola_karier_pns_slide_1791792629283.jpg',
   },
   {
     id: 'hero-sdm',
     name: 'Ilustrasi: SDM APARATUR TRANSFORMASI',
     badge: 'Ilustrasi Tema',
     description: 'Visual aparatur sipil negara modern dan BerAKHLAK',
-    url: '/src/assets/images/hero_sdm_aparatur_1790755834040.jpg',
+    url: '/images/hero_sdm_aparatur_1790755834040.jpg',
+  },
+  {
+    id: 'dokumentasi-sdma',
+    name: 'Dokumentasi: VISUAL KEGIATAN SDMA',
+    badge: 'Aset Proyek',
+    description: 'Dokumentasi visual kegiatan Kedeputian SDMA pada aset statis proyek',
+    url: '/images/WhatsApp_Image_2026-10-28_at_11.32.35_AM_f1b0cf21.jpeg',
   },
 ];
 
 /**
  * Automatically detects the appropriate Instagram thumbnail / cover image
  * for a policy based on its ID, slug, title, or Instagram post details.
+ * Always returns a permanent post-build static path (`/images/...`).
  */
 export function detectInstagramThumbnail(item: {
   id?: string;
@@ -63,7 +75,7 @@ export function detectInstagramThumbnail(item: {
   const id = (item.id || '').toLowerCase();
 
   if (t.includes('pelaksana') || s.includes('pelaksana') || id.includes('pelaksana')) {
-    return '/src/assets/images/infographic_jabatan_pelaksana_1790755819303.jpg';
+    return '/images/infographic_jabatan_pelaksana_1790755819303.jpg';
   }
 
   if (
@@ -73,7 +85,7 @@ export function detectInstagramThumbnail(item: {
     s.includes('jenjang') ||
     id.includes('naik-pangkat')
   ) {
-    return '/src/assets/images/infographic_naik_pangkat_1790755802597.jpg';
+    return '/images/infographic_naik_pangkat_1790755802597.jpg';
   }
 
   if (
@@ -83,39 +95,62 @@ export function detectInstagramThumbnail(item: {
     s.includes('merit') ||
     id.includes('talenta')
   ) {
-    return '/src/assets/images/infographic_manajemen_talenta_1790755861584.jpg';
+    return '/images/infographic_manajemen_talenta_1790755861584.jpg';
   }
 
   if (t.includes('karier') || s.includes('karier') || id.includes('karier')) {
-    return '/src/assets/images/pola_karier_pns_slide_1791792629283.jpg';
+    return '/images/pola_karier_pns_slide_1791792629283.jpg';
   }
 
-  return '/src/assets/images/infographic_jabatan_pelaksana_1790755819303.jpg';
+  return DEFAULT_FALLBACK_IMAGE_PATH;
 }
 
 export function getEffectiveThumbnail(policy: Partial<Policy>): string {
-  if (policy.isCustomThumbnail && policy.thumbnail) {
-    return policy.thumbnail;
+  const explicitCustom = normalizeStaticImageUrl(policy.customThumbnail);
+  const custom = normalizeStaticImageUrl(policy.thumbnail);
+  if (policy.isCustomThumbnail && (explicitCustom || custom)) {
+    return explicitCustom || custom;
   }
-  if (policy.thumbnail && !policy.thumbnail.includes('placeholder')) {
-    return policy.thumbnail;
+  if (custom && !custom.includes('placeholder')) {
+    return custom;
   }
   return detectInstagramThumbnail(policy);
 }
 
 /**
- * Uploads an image file to Firebase Cloud Storage ONLY when explicitly enabled
- * (VITE_ENABLE_FIREBASE_STORAGE=true). When disabled on the Spark Plan, throws
- * an honest explanation without storing binary blobs in Firestore or temporary storage.
+ * Compresses an uploaded file into a local preview data URL (NEVER blob: and NEVER Firebase).
+ * Note: Callers in Admin UI must inform the admin that direct device uploads without a backend
+ * database/cloud storage are temporary to the current browser/preview session.
  */
 export async function compressImageFile(
   file: File,
   maxDimension = 1100,
-  quality = 0.82,
-  folder: StorageFolder = 'policies'
+  quality = 0.82
 ): Promise<string> {
-  const result = await uploadImageAsset(file, folder, maxDimension, quality);
-  return result.url;
+  return readAndCompressLocalPreviewImage(file, maxDimension, quality);
 }
 
+/**
+ * Compresses an uploaded image File so its data URL fits comfortably within
+ * Firestore document/field size limits (max ~480 KB chars) for persistent cross-device sync.
+ */
+export async function compressImageForFirestore(
+  file: Blob | File,
+  maxChars = 480000
+): Promise<string> {
+  const attempts: Array<{ dim: number; quality: number }> = [
+    { dim: 1100, quality: 0.82 },
+    { dim: 900, quality: 0.72 },
+    { dim: 720, quality: 0.62 },
+    { dim: 560, quality: 0.52 },
+  ];
 
+  let lastResult = '';
+  for (const attempt of attempts) {
+    lastResult = await readAndCompressLocalPreviewImage(file, attempt.dim, attempt.quality);
+    if (lastResult.length <= maxChars) {
+      return lastResult;
+    }
+  }
+  return lastResult;
+}

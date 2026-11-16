@@ -46,8 +46,15 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({ category, index = 0 
       className="group h-full bg-white rounded-2xl border border-slate-200/90 p-6 shadow-2xs hover:shadow-[0_18px_36px_-12px_rgba(7,82,154,0.12)] hover:border-[#07529A]/40 transition-all duration-200 cursor-pointer flex flex-col justify-between relative overflow-hidden"
     >
       <div>
-        <div className="w-11 h-11 rounded-xl bg-[#07529A]/8 group-hover:bg-[#07529A] text-[#07529A] group-hover:text-[#FFD84D] flex items-center justify-center transition-colors duration-200 mb-4 shrink-0">
-          <CategoryIcon name={category.iconName} className="w-5 h-5" />
+        <div className="flex items-start justify-between gap-2 mb-4">
+          <div className="w-11 h-11 rounded-xl bg-[#07529A]/8 group-hover:bg-[#07529A] text-[#07529A] group-hover:text-[#FFD84D] flex items-center justify-center transition-colors duration-200 shrink-0">
+            <CategoryIcon name={category.iconName} className="w-5 h-5" />
+          </div>
+          {category.group === 'pilar' && (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/80 text-[10px] font-bold uppercase tracking-wider">
+              Pilar Konten
+            </span>
+          )}
         </div>
 
         <h3 className="font-bold text-slate-900 group-hover:text-[#07529A] transition-colors text-[15px] sm:text-base leading-snug mb-2 line-clamp-2 min-h-[2.6rem]">
@@ -61,7 +68,7 @@ export const CategoryCard: React.FC<CategoryCardProps> = ({ category, index = 0 
 
       <div className="flex items-center justify-between pt-3.5 border-t border-slate-100 text-xs text-slate-500">
         <span className="font-semibold text-slate-700 tabular-nums">
-          {count} Kebijakan
+          {count} {category.group === 'pilar' ? 'Konten' : 'Kebijakan'}
         </span>
         <span className="text-[#07529A] group-hover:translate-x-1 transition-transform duration-150 flex items-center gap-1 font-bold whitespace-nowrap shrink-0">
           <span>Lihat topik</span>

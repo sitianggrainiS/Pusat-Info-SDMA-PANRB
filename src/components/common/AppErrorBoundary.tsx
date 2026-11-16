@@ -1,46 +1,29 @@
 import React from 'react';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
 
-interface FirestoreErrorBoundaryState {
+interface AppErrorBoundaryState {
   hasError: boolean;
   errorMessage: string;
 }
 
-export class FirestoreErrorBoundary extends React.Component<
+export class AppErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  FirestoreErrorBoundaryState
+  AppErrorBoundaryState
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
     this.state = { hasError: false, errorMessage: '' };
   }
 
-  static getDerivedStateFromError(error: Error): FirestoreErrorBoundaryState {
-    let readable = error.message || 'Terjadi kendala saat memproses data.';
-    try {
-      const parsed = JSON.parse(error.message);
-      if (parsed && typeof parsed.error === 'string') {
-        if (parsed.error.includes('Quota exceeded')) {
-          readable =
-            'Kuota harian gratis Cloud Firestore telah tercapai dan akan direset kembali esok hari.';
-        } else if (
-          parsed.error.includes('Missing or insufficient permissions') ||
-          parsed.error.includes('PERMISSION_DENIED')
-        ) {
-          readable =
-            'Akses ditolak oleh Firestore Security Rules. Pastikan Anda telah masuk menggunakan akun Google Admin yang terverifikasi.';
-        } else {
-          readable = parsed.error;
-        }
-      }
-    } catch {
-      // Non-JSON error message
-    }
-    return { hasError: true, errorMessage: readable };
+  static getDerivedStateFromError(error: Error): AppErrorBoundaryState {
+    return {
+      hasError: true,
+      errorMessage: error.message || 'Terjadi kendala saat memuat halaman aplikasi.',
+    };
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('FirestoreErrorBoundary caught an error:', error, info);
+    console.error('AppErrorBoundary caught an error:', error, info);
   }
 
   render() {
@@ -52,7 +35,7 @@ export class FirestoreErrorBoundary extends React.Component<
               <AlertTriangle className="w-6 h-6" />
             </div>
             <h2 className="text-lg font-extrabold text-slate-900">
-              Kendala Sinkronisasi Data
+              Terjadi Kendala Tampilan
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
               {this.state.errorMessage}

@@ -2,24 +2,38 @@ import React, { useState, useEffect, useRef } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { Policy, PolicyStatus, SourceDocument } from '../../types';
-import {
-  InstagramEmbed,
-  extractInstagramInfo,
-  extractInstagramDateFromUrl,
-  resolvePolicyReleaseDate,
-} from '../../components/common/InstagramEmbed';
+import { InstagramEmbed, extractInstagramInfo } from '../../components/common/InstagramEmbed';
 import { CategoryIcon } from '../../components/common/CategoryIcon';
 import { CalendarDatePicker } from '../../components/common/CalendarDatePicker';
+import { formatContentDate, getTodayIndonesianDate } from '../../utils/dateUtils';
 import { STANDARD_KLASTER_IDS } from '../../data/initialData';
 import {
   detectInstagramThumbnail,
   AVAILABLE_INSTAGRAM_PREVIEWS,
-  compressImageFile,
+  compressImageForFirestore,
 } from '../../utils/thumbnailUtils';
+import {
+  isTemporaryRuntimeUploadUrl,
+  normalizeStaticImageUrl,
+} from '../../data/staticImages';
+import {
+  StaticAssetPicker,
+  UploadLimitationNotice,
+} from '../../components/admin/StaticAssetPicker';
+import {
+  UrlImagePreviewStatus,
+  ImagePreviewLoadState,
+} from '../../components/admin/UrlImagePreviewStatus';
+import { PolicyMediaFrame } from '../../components/policy/PolicyMediaFrame';
+import {
+  isInstagramWebPageUrl,
+  validateDirectImageUrl,
+} from '../../utils/imageUrlUtils';
 import {
   detectRegulationFromUrl,
   POPULAR_REGULATION_PRESETS,
 } from '../../utils/regulationUtils';
+import { DEFAULT_POLICY_PLACEHOLDER_SUMMARY } from '../../utils/policySummaryUtils';
 import {
   Save,
   ArrowLeft,
@@ -59,8 +73,6 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const existingPolicy = policyId ? policies.find((p) => p.id === policyId) : undefined;
-  const hasManualDateEditRef = useRef<boolean>(false);
-  const syncedPolicyIdRef = useRef<string | undefined>(existingPolicy?.id);
 
   // Form states
   const [instagramPostUrl, setInstagramPostUrl] = useState(
@@ -71,31 +83,29 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
   );
   const [title, setTitle] = useState(existingPolicy?.title || initialDraftData?.title || '');
   const [summary, setSummary] = useState(existingPolicy?.summary || initialDraftData?.summary || '');
-  const [instagramDate, setInstagramDate] = useState(() => {
-    if (existingPolicy) {
-      const resolved = resolvePolicyReleaseDate(existingPolicy);
-      if (resolved && resolved !== '-') return resolved;
-    }
-    return (
-      initialDraftData?.instagramDate ||
-      initialDraftData?.publicationDate ||
-      extractInstagramDateFromUrl(
-        existingPolicy?.instagramPostUrl || initialDraftData?.instagramPostUrl
-      ) ||
-      new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
-    );
-  });
+  const [instagramDate, setInstagramDate] = useState(
+    formatContentDate(
+      existingPolicy?.instagramDate ||
+        existingPolicy?.publicationDate ||
+        initialDraftData?.instagramDate ||
+        initialDraftData?.publicationDate
+    ) || getTodayIndonesianDate()
+  );
   const [status, setStatus] = useState<PolicyStatus>(existingPolicy?.status || 'published');
   const [formError, setFormError] = useState<string | null>(null);
-  const [isSavingPolicy, setIsSavingPolicy] = useState<boolean>(false);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Thumbnail states
   const [isManualOverride, setIsManualOverride] = useState<boolean>(
     Boolean(existingPolicy?.isCustomThumbnail)
   );
   const [customThumbnailValue, setCustomThumbnailValue] = useState<string>(
-    existingPolicy?.customThumbnail || existingPolicy?.thumbnail || ''
+    existingPolicy?.isCustomThumbnail
+      ? existingPolicy?.customThumbnail || existingPolicy?.thumbnail || ''
+      : ''
   );
+  const [thumbLoadState, setThumbLoadState] = useState<ImagePreviewLoadState>('idle');
+  const [thumbLoadError, setThumbLoadError] = useState<string | undefined>(undefined);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [previewTab, setPreviewTab] = useState<'embed' | 'card' | 'regulations' | 'ai-summary'>('embed');
@@ -107,12 +117,67 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
   const [aiSummary, setAiSummary] = useState<string>(
     existingPolicy?.aiSummary || ''
   );
+
   const [isAiSummaryApproved, setIsAiSummaryApproved] = useState<boolean>(
-    Boolean(existingPolicy?.isAiSummaryApproved && existingPolicy?.aiSummary)
+    Boolean(
+      existingPolicy?.aiSummary?.trim() && existingPolicy?.isAiSummaryApproved !== false
+    )
   );
   const [isGeneratingSummary, setIsGeneratingSummary] = useState<boolean>(false);
   const [aiSummaryError, setAiSummaryError] = useState<string | null>(null);
   const [aiSummarySuccess, setAiSummarySuccess] = useState<string | null>(null);
+
+  // Hydrate form fields if existingPolicy arrives asynchronously from /api/policies
+  const hydratedPolicyIdRef = useRef<string | undefined>(existingPolicy?.id);
+  useEffect(() => {
+    if (existingPolicy && hydratedPolicyIdRef.current !== existingPolicy.id) {
+      hydratedPolicyIdRef.current = existingPolicy.id;
+      setInstagramPostUrl(existingPolicy.instagramPostUrl || '');
+      setCategoryId(existingPolicy.categoryId || categories[0]?.id || '');
+      setTitle(existingPolicy.title || '');
+      setSummary(existingPolicy.summary || '');
+      setInstagramDate(
+        formatContentDate(existingPolicy.instagramDate || existingPolicy.publicationDate) ||
+          getTodayIndonesianDate()
+      );
+      setStatus(existingPolicy.status || 'published');
+      setIsManualOverride(Boolean(existingPolicy.isCustomThumbnail));
+      setCustomThumbnailValue(
+        existingPolicy.isCustomThumbnail
+          ? existingPolicy.customThumbnail || existingPolicy.thumbnail || ''
+          : ''
+      );
+      setInstagramCaption(existingPolicy.instagramCaption || '');
+      setAiSummary(existingPolicy.aiSummary || '');
+      setIsAiSummaryApproved(
+        Boolean(
+          existingPolicy.aiSummary?.trim() && existingPolicy.isAiSummaryApproved !== false
+        )
+      );
+      if (Array.isArray(existingPolicy.sources)) {
+        setRegulations(
+          existingPolicy.sources.map((s, idx) => ({
+            id: s.id || `src-${Date.now()}-${idx}`,
+            title: s.title || '',
+            fileUrl: s.fileUrl || '',
+            regulationType: s.regulationType || 'Peraturan Menteri PANRB',
+            regulationNumber: s.regulationNumber || '',
+            year: s.year || new Date().getFullYear().toString(),
+            articles: s.articles || '',
+            description: s.description || '',
+            isVerified: s.isVerified !== undefined ? s.isVerified : true,
+          }))
+        );
+      }
+    }
+  }, [existingPolicy, categories]);
+
+  // Ensure default categoryId selects the first Firestore category once loaded
+  useEffect(() => {
+    if (!categoryId && !existingPolicy && categories.length > 0) {
+      setCategoryId(categories[0].id);
+    }
+  }, [categoryId, existingPolicy, categories]);
 
   // Regulatory references (Regulasi Terkait) state
   const [regulations, setRegulations] = useState<SourceDocument[]>(() => {
@@ -248,28 +313,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
     ? customThumbnailValue || autoDetectedThumbnail
     : autoDetectedThumbnail;
 
-  // Sync form fields if existingPolicy finishes loading from Firestore after initial mount
-  useEffect(() => {
-    if (existingPolicy && syncedPolicyIdRef.current !== existingPolicy.id) {
-      syncedPolicyIdRef.current = existingPolicy.id;
-      setInstagramPostUrl(existingPolicy.instagramPostUrl || '');
-      setCategoryId(existingPolicy.categoryId || categories[0]?.id || '');
-      setTitle(existingPolicy.title || '');
-      setSummary(existingPolicy.summary || '');
-      const resolved = resolvePolicyReleaseDate(existingPolicy);
-      if (resolved && resolved !== '-') {
-        setInstagramDate(resolved);
-      }
-      setStatus(existingPolicy.status || 'published');
-      setIsManualOverride(Boolean(existingPolicy.isCustomThumbnail));
-      setCustomThumbnailValue(existingPolicy.customThumbnail || existingPolicy.thumbnail || '');
-      setInstagramCaption(existingPolicy.instagramCaption || '');
-      setAiSummary(existingPolicy.aiSummary || '');
-      setIsAiSummaryApproved(Boolean(existingPolicy.isAiSummaryApproved && existingPolicy.aiSummary));
-    }
-  }, [existingPolicy, categories]);
-
-  // Auto-generate title & sync post upload date when user enters Instagram URL
+  // Auto-generate title if user enters Instagram URL and title is empty
   useEffect(() => {
     if (instagramInfo.isValid && !title.trim()) {
       if (instagramInfo.type === 'reel') {
@@ -278,12 +322,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
         setTitle('Infografis Edukasi Kebijakan SDM Aparatur');
       }
     }
-    if (instagramInfo.isValid && instagramInfo.detectedDate && !hasManualDateEditRef.current) {
-      if (!existingPolicy || instagramInfo.cleanUrl !== existingPolicy.instagramPostUrl) {
-        setInstagramDate(instagramInfo.detectedDate);
-      }
-    }
-  }, [instagramInfo.cleanUrl, instagramInfo.detectedDate]);
+  }, [instagramInfo.cleanUrl]);
 
   const handlePasteExample = () => {
     setInstagramPostUrl('https://www.instagram.com/p/Ddi76RtGXeH/');
@@ -302,16 +341,12 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
     try {
       setIsUploading(true);
       setUploadError(null);
-      const uploadedUrl = await compressImageFile(file);
-      setCustomThumbnailValue(uploadedUrl);
+      const compressedDataUrl = await compressImageForFirestore(file);
+      setCustomThumbnailValue(compressedDataUrl);
       setIsManualOverride(true);
     } catch (err) {
-      console.error('Failed to process uploaded image', err);
-      setUploadError(
-        err instanceof Error
-          ? err.message
-          : 'Gagal memproses gambar. Gunakan URL gambar eksternal (https://...) atau cover bawaan.'
-      );
+      console.error('Failed to compress uploaded image', err);
+      setUploadError('Gagal memproses gambar. Silakan coba file lain.');
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -334,10 +369,15 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
     setAiSummaryError(null);
     setAiSummarySuccess(null);
 
-    const captionTrimmed = instagramCaption.trim();
-    if (!captionTrimmed) {
+    const manualSummaryCandidate =
+      summary.trim() && summary.trim() !== DEFAULT_POLICY_PLACEHOLDER_SUMMARY
+        ? summary.trim()
+        : '';
+    const sourceText = instagramCaption.trim() || manualSummaryCandidate;
+
+    if (!sourceText) {
       setAiSummaryError(
-        'Teks kepsyen atau materi teks slide infografis belum diisi. Masukkan teks kepsyen atau salin poin teks slide Instagram terlebih dahulu agar AI dapat merangkum secara akurat.'
+        'Teks kepsyen atau materi teks slide infografis belum diisi. Masukkan teks kepsyen pada kotak di atas terlebih dahulu agar AI dapat menyusun deskripsi Tentang Konten.'
       );
       return;
     }
@@ -352,7 +392,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
         body: JSON.stringify({
           title: title.trim() || 'Edukasi Kebijakan SDM Aparatur',
           clusterName: selectedCluster?.name || 'SDM Aparatur',
-          captionText: captionTrimmed,
+          captionText: sourceText,
           regulations: regulations.filter((r) => r.title.trim()),
         }),
       });
@@ -363,11 +403,18 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
       }
 
       const generated = (data.summary || '').trim();
+      if (!generated) {
+        throw new Error('Hasil ringkasan AI kosong. Silakan coba lagi.');
+      }
+
       setAiSummary(generated);
-      // As per requirement: Never publish AI-generated summaries automatically.
-      setIsAiSummaryApproved(false);
+      setIsAiSummaryApproved(true);
+      if (!summary.trim() || summary.trim() === DEFAULT_POLICY_PLACEHOLDER_SUMMARY) {
+        setSummary(generated);
+      }
+      setPreviewTab('ai-summary');
       setAiSummarySuccess(
-        'Ringkasan AI berhasil dibuat (3–4 kalimat). Silakan periksa, edit jika perlu, lalu klik "Setujui Ringkasan AI untuk Publikasi" sebelum menyimpan.'
+        'Ringkasan AI berhasil dibuat dan otomatis diaktifkan untuk bagian "Tentang Konten" di halaman Jelajahi Konten. Klik "Simpan & Publikasikan" untuk menyimpan perubahan.'
       );
     } catch (err: any) {
       console.error('Error generating AI summary:', err);
@@ -379,19 +426,19 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
 
   const handleToggleApproval = () => {
     if (!aiSummary.trim()) {
-      setAiSummaryError('Tidak ada teks ringkasan AI untuk disetujui.');
+      setAiSummaryError('Tidak ada teks ringkasan AI untuk diaktifkan.');
       return;
     }
     const nextApproved = !isAiSummaryApproved;
     setIsAiSummaryApproved(nextApproved);
     if (nextApproved) {
       setAiSummarySuccess(
-        'Ringkasan AI telah disetujui! Ringkasan ini akan ditampilkan pada panel "Tentang Konten" di halaman publik setelah Anda menyimpan perubahan.'
+        'Ringkasan AI aktif dan akan ditampilkan pada bagian "Tentang Konten" saat pengunjung mengklik Lihat Selengkapnya.'
       );
       setAiSummaryError(null);
     } else {
       setAiSummarySuccess(
-        'Persetujuan ringkasan AI dibatalkan. Halaman publik akan tetap menampilkan deskripsi manual sampai admin menyetujui kembali.'
+        'Ringkasan AI dinonaktifkan sementara. Bagian "Tentang Konten" akan menampilkan catatan edukasi manual di Langkah 3.'
       );
     }
   };
@@ -414,16 +461,73 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
   };
 
   const handleSave = async (targetStatus: PolicyStatus = status) => {
-    const trimmedUrl = instagramPostUrl.trim();
-    if (!trimmedUrl) {
-      setFormError('URL Postingan Instagram wajib diisi.');
+    const trimmedPostUrl = instagramPostUrl.trim();
+    const checkIg = extractInstagramInfo(trimmedPostUrl);
+    const trimmedCustomThumb = customThumbnailValue.trim();
+    const hasCustomThumbInput = Boolean(isManualOverride && trimmedCustomThumb);
+
+    // Check if Admin pasted a direct image URL into Step 1 instead of an IG post link
+    const step1DirectImageCheck =
+      trimmedPostUrl && !checkIg.isValid && !isInstagramWebPageUrl(trimmedPostUrl)
+        ? validateDirectImageUrl(trimmedPostUrl)
+        : { isValid: false, cleanUrl: '' };
+    const isStep1LikelyDirectImage =
+      step1DirectImageCheck.isValid &&
+      /\.(jpe?g|png|webp|gif|svg|avif)(\?.*)?$/i.test(trimmedPostUrl);
+
+    if (!trimmedPostUrl && !hasCustomThumbInput) {
+      setFormError(
+        'Masukkan minimal URL Postingan Instagram (untuk embed) atau URL Gambar Konten (pada Langkah 5).'
+      );
       return;
     }
 
-    const check = extractInstagramInfo(trimmedUrl);
-    if (!check.isValid) {
-      setFormError('Masukkan URL postingan, karusel, atau Reel Instagram yang valid.');
+    if (trimmedPostUrl && isInstagramWebPageUrl(trimmedPostUrl) && !checkIg.isValid) {
+      setFormError(
+        'URL Instagram yang dimasukkan bukan tautan postingan/karusel/Reel spesifik (contoh valid: https://www.instagram.com/p/Ddi76RtGXeH/). Jika hanya ingin menampilkan gambar, masukkan URL file gambar langsung pada kolom URL Gambar di Langkah 5.'
+      );
       return;
+    }
+
+    if (trimmedPostUrl && !checkIg.isValid && !isStep1LikelyDirectImage) {
+      try {
+        const parsed = new URL(trimmedPostUrl);
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+          setFormError('Tautan sumber konten wajib menggunakan protokol https:// atau http://.');
+          return;
+        }
+      } catch {
+        setFormError(
+          'Format URL Postingan / Tautan Sumber tidak valid. Gunakan URL lengkap yang diawali https://'
+        );
+        return;
+      }
+    }
+
+    let finalCustomThumbUrl = '';
+    let finalIsCustom = false;
+
+    if (hasCustomThumbInput) {
+      const imgCheck = validateDirectImageUrl(trimmedCustomThumb, {
+        allowEmpty: false,
+        allowDataUrl: true,
+      });
+      if (!imgCheck.isValid) {
+        setFormError(imgCheck.error || 'URL gambar tidak valid.');
+        return;
+      }
+      if (thumbLoadState === 'error') {
+        setFormError(
+          thumbLoadError ||
+            'URL gambar gagal dimuat. Pastikan URL mengarah langsung ke file gambar yang valid dan dapat diakses publik sebelum menyimpan.'
+        );
+        return;
+      }
+      finalCustomThumbUrl = imgCheck.cleanUrl;
+      finalIsCustom = true;
+    } else if (isStep1LikelyDirectImage) {
+      finalCustomThumbUrl = step1DirectImageCheck.cleanUrl;
+      finalIsCustom = true;
     }
 
     if (!categoryId) {
@@ -440,7 +544,12 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
         .replace(/[^\w\s-]/g, '')
         .replace(/[\s_-]+/g, '-') + '-' + Date.now().toString().slice(-4);
 
-    const finalThumb = effectiveThumbnail;
+    const finalThumb = finalIsCustom ? finalCustomThumbUrl : autoDetectedThumbnail;
+    const finalPostOrSourceUrl = checkIg.isValid
+      ? checkIg.cleanUrl
+      : isStep1LikelyDirectImage
+      ? ''
+      : trimmedPostUrl;
 
     // Filter and map admin-linked regulations (persisted to public website)
     const validSources: SourceDocument[] = regulations
@@ -461,47 +570,53 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
         };
       });
 
-    const effectiveReleaseDate =
-      instagramDate.trim() ||
-      check.detectedDate ||
-      existingPolicy?.publicationDate ||
-      new Date().toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
+    if (!instagramDate.trim()) {
+      setFormError('Tanggal publikasi konten wajib diisi.');
+      return;
+    }
+
+    const cleanInputDate = formatContentDate(instagramDate.trim());
+    const cleanAiSummary = aiSummary.trim();
+    const effectiveIsAiApproved = Boolean(isAiSummaryApproved && cleanAiSummary);
+    const cleanManualSummary = summary.trim();
+    const resolvedSummaryForSave =
+      effectiveIsAiApproved &&
+      (!cleanManualSummary || cleanManualSummary === DEFAULT_POLICY_PLACEHOLDER_SUMMARY)
+        ? cleanAiSummary
+        : cleanManualSummary || DEFAULT_POLICY_PLACEHOLDER_SUMMARY;
 
     const payload: Partial<Policy> = {
       title: finalTitle,
       slug,
       categoryId,
-      summary:
-        summary.trim() ||
-        'Materi edukasi kebijakan SDM Aparatur yang bersumber dari media sosial resmi KemenPANRB.',
+      summary: resolvedSummaryForSave,
       status: targetStatus,
       thumbnail: finalThumb,
       instagramThumbnail: finalThumb,
-      isCustomThumbnail: isManualOverride,
-      customThumbnail: isManualOverride ? finalThumb : undefined,
+      isCustomThumbnail: finalIsCustom,
+      customThumbnail: finalIsCustom ? finalThumb : undefined,
       autoThumbnail: autoDetectedThumbnail,
-      instagramPostUrl: check.cleanUrl,
-      instagramDate: effectiveReleaseDate,
-      instagramAccountHandle:
-        check.accountHandle || existingPolicy?.instagramAccountHandle || '@sdmapanrb',
-      contextExplanation: summary.trim() || existingPolicy?.contextExplanation || '',
+      instagramPostUrl: finalPostOrSourceUrl,
+      instagramDate: cleanInputDate,
+      instagramAccountHandle: '@sdmapanrb',
+      contextExplanation:
+        (effectiveIsAiApproved ? cleanAiSummary : cleanManualSummary) ||
+        existingPolicy?.contextExplanation ||
+        '',
       sources: validSources,
-      // AI Summary fields
-      aiSummary: aiSummary.trim() || undefined,
-      isAiSummaryApproved: Boolean(isAiSummaryApproved && aiSummary.trim()),
-      aiSummaryGeneratedAt: aiSummary.trim()
+      aiAssisted: Boolean(cleanAiSummary),
+      // AI Summary fields (empty string clears server value cleanly when removed)
+      aiSummary: cleanAiSummary || '',
+      isAiSummaryApproved: effectiveIsAiApproved,
+      aiSummaryGeneratedAt: cleanAiSummary
         ? existingPolicy?.aiSummaryGeneratedAt || new Date().toISOString()
-        : undefined,
-      instagramCaption: instagramCaption.trim() || undefined,
-      publicationDate: effectiveReleaseDate,
+        : '',
+      instagramCaption: instagramCaption.trim() || '',
+      publicationDate: cleanInputDate,
     };
 
     try {
-      setIsSavingPolicy(true);
+      setIsSaving(true);
       setFormError(null);
       if (existingPolicy) {
         await updatePolicy(existingPolicy.id, payload);
@@ -512,7 +627,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
     } catch (err: any) {
       setFormError(err?.message || 'Gagal menyimpan konten ke Cloud Firestore.');
     } finally {
-      setIsSavingPolicy(false);
+      setIsSaving(false);
     }
   };
 
@@ -532,20 +647,20 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
           </button>
           <button
             type="button"
-            disabled={isSavingPolicy}
+            disabled={isSaving}
             onClick={() => handleSave('draft')}
-            className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 disabled:opacity-60 border border-amber-300 text-amber-900 text-xs font-bold rounded-xl transition-colors cursor-pointer"
+            className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 border border-amber-300 text-amber-900 text-xs font-bold rounded-xl transition-colors cursor-pointer"
           >
-            {isSavingPolicy ? 'Menyimpan...' : 'Simpan Draf'}
+            Simpan Draf
           </button>
           <button
             type="button"
-            disabled={isSavingPolicy}
+            disabled={isSaving}
             onClick={() => handleSave('published')}
             className="px-4 py-2 bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
           >
-            <Save className="w-3.5 h-3.5" />
-            <span>{isSavingPolicy ? 'Menyimpan ke Firestore...' : 'Simpan & Publikasikan'}</span>
+            {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            <span>{isSaving ? 'Menyimpan...' : 'Simpan & Publikasikan'}</span>
           </button>
         </div>
       }
@@ -578,7 +693,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                   <span className="w-5 h-5 rounded-full bg-[#07529A] text-white flex items-center justify-center text-[11px] font-mono font-bold">
                     1
                   </span>
-                  <span>URL Postingan Instagram *</span>
+                  <span>URL Postingan Instagram / Tautan Sumber Konten</span>
                 </label>
                 <button
                   type="button"
@@ -596,18 +711,17 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                 </div>
                 <input
                   type="url"
-                  required
                   value={instagramPostUrl}
                   onChange={(e) => {
                     setInstagramPostUrl(e.target.value);
                     setFormError(null);
                   }}
-                  placeholder="https://www.instagram.com/p/Ddi76RtGXeH/ atau Reels / Karusel"
+                  placeholder="https://www.instagram.com/p/Ddi76RtGXeH/ atau tautan artikel sumber (opsional jika menggunakan URL Gambar)"
                   className="w-full text-xs font-medium pl-10 pr-4 py-3 rounded-xl border border-slate-300 focus:border-[#07529A] focus:ring-2 focus:ring-blue-100 focus:outline-none transition-all"
                 />
               </div>
               <p className="text-[11px] text-slate-500">
-                Mendukung postingan foto tunggal, karusel gambar (multi-slide), dan Instagram Reels.
+                Masukkan URL postingan/Reel Instagram untuk menampilkan embed interaktif, atau tautan sumber artikel. Untuk menampilkan file gambar langsung (https://.../gambar.jpg), masukkan pada kolom <strong>URL Gambar</strong> di Langkah 5.
               </p>
             </div>
 
@@ -621,7 +735,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                   <span>Pilih Klaster Manajemen ASN / Pilar Konten (Wajib) *</span>
                 </label>
                 <p className="text-[11px] text-slate-500">
-                  Tugaskan konten pada salah satu dari 8 Klaster Manajemen ASN atau Pilar Konten Sekolah Kedinasan:
+                  Tugaskan konten pada salah satu dari 8 Klaster Manajemen ASN atau Pilar Konten (Sekolah Kedinasan, Fun Content, dll.):
                 </p>
               </div>
 
@@ -685,7 +799,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                         Pilar Konten
                       </span>
                       <span className="text-[10px] font-semibold text-[#07529A] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                        Non-Klaster
+                        {pilarCategories.length} Pilar Konten
                       </span>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -775,10 +889,10 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                 <CalendarDatePicker
                   value={instagramDate}
                   onChange={(val) => {
-                    hasManualDateEditRef.current = Boolean(val.trim());
                     setInstagramDate(val);
+                    if (formError) setFormError(null);
                   }}
-                  label="Tanggal Publikasi Instagram"
+                  label="Tanggal Publikasi Konten *"
                 />
               </div>
             </div>
@@ -881,9 +995,9 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                 <button
                   type="button"
                   onClick={handleGenerateAiSummary}
-                  disabled={isGeneratingSummary || !instagramCaption.trim()}
+                  disabled={isGeneratingSummary}
                   className={`w-full py-2.5 px-4 rounded-xl font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-xs ${
-                    isGeneratingSummary || !instagramCaption.trim()
+                    isGeneratingSummary
                       ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
                       : 'bg-gradient-to-r from-[#07529A] via-[#0960b3] to-[#4F46E5] hover:opacity-95 text-white active:scale-98'
                   }`}
@@ -891,7 +1005,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                   {isGeneratingSummary ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin text-white" />
-                      <span>Menyusun Ringkasan AI (gemini-3.8-flash)...</span>
+                      <span>Menyusun Ringkasan AI...</span>
                     </>
                   ) : (
                     <>
@@ -923,7 +1037,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b border-slate-200/80 pb-2">
                     <label className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-[#07529A]" />
-                      <span>Draf Ringkasan AI (Review & Edit Admin)</span>
+                      <span>Deskripsi Ringkasan AI (Tampil di "Tentang Konten")</span>
                     </label>
 
                     <div className="flex items-center gap-2">
@@ -940,14 +1054,18 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                   </div>
 
                   <p className="text-[11px] text-slate-500 leading-snug">
-                    Teks ini dapat disunting manual secara bebas oleh admin. Pastikan isi akurat sebelum menyetujui.
+                    Deskripsi ini otomatis aktif untuk bagian <strong>"Tentang Konten"</strong> pada halaman detail saat pengunjung mengklik <strong>"Lihat Selengkapnya"</strong>. Anda juga dapat menyunting teks di bawah ini sebelum menyimpan.
                   </p>
 
                   <textarea
                     rows={4}
                     value={aiSummary}
                     onChange={(e) => {
-                      setAiSummary(e.target.value);
+                      const nextVal = e.target.value;
+                      setAiSummary(nextVal);
+                      if (nextVal.trim() && !isAiSummaryApproved) {
+                        setIsAiSummaryApproved(true);
+                      }
                       if (aiSummarySuccess) setAiSummarySuccess(null);
                     }}
                     placeholder="Teks ringkasan AI..."
@@ -1025,178 +1143,168 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                 Thumbnail ini ditampilkan pada kartu konten di website publik KOMPAK dan wajib selaras dengan cover postingan Instagram.
               </p>
 
-              {/* Mode Selection Radio Cards */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Option 1: Automatic Detection */}
-                <label
-                  onClick={() => setIsManualOverride(false)}
-                  className={`p-3.5 rounded-2xl border text-xs cursor-pointer transition-all flex flex-col justify-between ${
-                    !isManualOverride
-                      ? 'bg-blue-50/90 border-[#07529A] ring-2 ring-[#07529A]/15'
-                      : 'bg-slate-50/50 border-slate-200 hover:bg-slate-100/70'
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <input
-                      type="radio"
-                      name="thumbnail_mode"
-                      checked={!isManualOverride}
-                      onChange={() => setIsManualOverride(false)}
-                      className="mt-0.5 text-[#07529A] focus:ring-[#07529A]"
-                    />
-                    <div>
-                      <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-[#07529A]" />
-                        <span>Otomatis (Sesuai Instagram)</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-1 leading-snug">
-                        Sistem mendeteksi cover resmi dari materi Instagram secara otomatis.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex items-center gap-2">
-                    <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-300 shrink-0 bg-slate-200">
-                      <img
-                        src={autoDetectedThumbnail}
-                        alt="Cover Otomatis"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <span className="text-[10px] text-slate-600 font-medium truncate">
-                      {autoDetectedThumbnail.includes('jabatan_pelaksana')
-                        ? 'Cover: JABATAN PELAKSANA'
-                        : autoDetectedThumbnail.includes('naik_pangkat')
-                        ? 'Cover: NAIK PANGKAT ≠ NAIK JENJANG'
-                        : autoDetectedThumbnail.includes('manajemen_talenta')
-                        ? 'Cover: MANAJEMEN TALENTA & SISTEM MERIT'
-                        : 'Cover Otomatis Instagram'}
-                    </span>
-                  </div>
-                </label>
-
-                {/* Option 2: Manual Override */}
-                <label
-                  onClick={() => setIsManualOverride(true)}
-                  className={`p-3.5 rounded-2xl border text-xs cursor-pointer transition-all flex flex-col justify-between ${
-                    isManualOverride
-                      ? 'bg-amber-50/80 border-amber-500 ring-2 ring-amber-500/15'
-                      : 'bg-slate-50/50 border-slate-200 hover:bg-slate-100/70'
-                  }`}
-                >
-                  <div className="flex items-start gap-2.5">
-                    <input
-                      type="radio"
-                      name="thumbnail_mode"
-                      checked={isManualOverride}
-                      onChange={() => setIsManualOverride(true)}
-                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
-                    />
-                    <div>
-                      <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
-                        <ImageIcon className="w-3.5 h-3.5 text-amber-600" />
-                        <span>Ganti / Override Manual</span>
-                      </div>
-                      <p className="text-[11px] text-slate-500 mt-1 leading-snug">
-                        Pilih dari cover slide resmi yang tersedia, unggah file foto baru, atau masukkan link gambar.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 pt-2.5 border-t border-slate-200/60 flex items-center gap-2">
-                    <div className="w-10 h-10 rounded-lg overflow-hidden border border-slate-300 shrink-0 bg-slate-200">
-                      <img
-                        src={customThumbnailValue || autoDetectedThumbnail}
-                        alt="Cover Manual"
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                    <span className="text-[10px] text-amber-800 font-semibold truncate">
-                      {isManualOverride ? 'Thumbnail Manual Aktif' : 'Klik untuk mengubah'}
-                    </span>
-                  </div>
-                </label>
-              </div>
-
-              {/* Expanded Controls for Manual Override */}
-              {isManualOverride && (
-                <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3.5 animate-in fade-in duration-150">
-                  <div className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                    <ImageIcon className="w-3.5 h-3.5 text-[#07529A]" />
-                    <span>Pilih Cover dari Galeri Slide Resmi KemenPANRB:</span>
-                  </div>
-
-                  {/* Preset Previews Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                    {AVAILABLE_INSTAGRAM_PREVIEWS.map((opt) => {
-                      const isChosen = customThumbnailValue === opt.url;
-                      return (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            setCustomThumbnailValue(opt.url);
-                            setIsManualOverride(true);
-                          }}
-                          className={`group relative rounded-xl overflow-hidden border text-left p-1 transition-all cursor-pointer ${
-                            isChosen
-                              ? 'border-[#07529A] ring-2 ring-[#07529A] bg-white shadow-xs'
-                              : 'border-slate-200 hover:border-slate-300 bg-white'
-                          }`}
-                        >
-                          <div className="aspect-4/3 w-full rounded-lg overflow-hidden bg-slate-100 relative">
-                            <img
-                              src={opt.url}
-                              alt={opt.name}
-                              className="w-full h-full object-cover group-hover:scale-102 transition-transform"
-                            />
-                            {isChosen && (
-                              <div className="absolute top-1 right-1 w-5 h-5 rounded-full bg-[#07529A] text-white flex items-center justify-center shadow-xs">
-                                <Check className="w-3 h-3" />
-                              </div>
-                            )}
-                          </div>
-                          <p className="text-[10px] font-bold text-slate-900 mt-1 line-clamp-1">
-                            {opt.name}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Upload from Device / Computer */}
-                  <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isUploading}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs"
-                    >
-                      {isUploading ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#07529A]" />
-                      ) : (
-                        <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
-                      )}
-                      <span>{isUploading ? 'Memproses Foto...' : 'Unggah File Gambar Baru'}</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCustomThumbnailValue(autoDetectedThumbnail);
-                        setIsManualOverride(false);
-                      }}
-                      className="text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer"
-                    >
-                      Kembalikan ke Otomatis
-                    </button>
-                  </div>
-
-                  {uploadError && (
-                    <p className="text-xs text-rose-600 font-semibold">{uploadError}</p>
-                  )}
+              {/* Direct Image URL Input (Always Accessible & Synced to Public Pages) */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3.5">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-800">
+                    URL Gambar Konten / Cover (https://... atau /images/...):
+                  </label>
+                  <input
+                    type="text"
+                    value={customThumbnailValue.startsWith('data:image/') ? '' : customThumbnailValue}
+                    onChange={(e) => {
+                      const val = normalizeStaticImageUrl(e.target.value);
+                      setCustomThumbnailValue(val);
+                      setIsManualOverride(Boolean(val.trim()));
+                      setFormError(null);
+                    }}
+                    placeholder="https://contoh.go.id/gambar-konten.jpg atau /images/nama-gambar.jpg"
+                    className="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-300 bg-white focus:border-[#07529A] focus:ring-2 focus:ring-blue-100 focus:outline-none"
+                  />
+                  <p className="text-[11px] text-slate-500">
+                    Gambar yang dimasukkan melalui URL ini akan otomatis ditampilkan secara proporsional pada halaman publik sesuai kategori konten yang dipilih.
+                  </p>
                 </div>
-              )}
+
+                {/* Live Image Preview & Load Verification Before Save */}
+                {isManualOverride && customThumbnailValue.trim() && (
+                  <UrlImagePreviewStatus
+                    imageUrl={customThumbnailValue}
+                    label="Pratinjau Gambar Konten Sebelum Disimpan"
+                    allowEmpty={false}
+                    onStatusChange={(st, err) => {
+                      setThumbLoadState(st);
+                      setThumbLoadError(err);
+                    }}
+                  />
+                )}
+
+                {/* Mode Selection Radio Cards */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  {/* Option 1: Automatic Detection */}
+                  <label
+                    onClick={() => {
+                      setIsManualOverride(false);
+                      setCustomThumbnailValue('');
+                      setThumbLoadState('idle');
+                      setThumbLoadError(undefined);
+                    }}
+                    className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all flex flex-col justify-between ${
+                      !isManualOverride
+                        ? 'bg-blue-50/90 border-[#07529A] ring-2 ring-[#07529A]/15'
+                        : 'bg-white border-slate-200 hover:bg-slate-100/70'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="radio"
+                        name="thumbnail_mode"
+                        checked={!isManualOverride}
+                        onChange={() => {
+                          setIsManualOverride(false);
+                          setCustomThumbnailValue('');
+                          setThumbLoadState('idle');
+                          setThumbLoadError(undefined);
+                        }}
+                        className="mt-0.5 text-[#07529A] focus:ring-[#07529A]"
+                      />
+                      <div>
+                        <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                          <Sparkles className="w-3.5 h-3.5 text-[#07529A]" />
+                          <span>Otomatis (Embed Instagram)</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                          Menampilkan embed postingan Instagram atau cover standar otomatis.
+                        </p>
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Option 2: Manual / Custom URL Override */}
+                  <label
+                    onClick={() => setIsManualOverride(true)}
+                    className={`p-3 rounded-2xl border text-xs cursor-pointer transition-all flex flex-col justify-between ${
+                      isManualOverride
+                        ? 'bg-amber-50/80 border-amber-500 ring-2 ring-amber-500/15'
+                        : 'bg-white border-slate-200 hover:bg-slate-100/70'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5">
+                      <input
+                        type="radio"
+                        name="thumbnail_mode"
+                        checked={isManualOverride}
+                        onChange={() => setIsManualOverride(true)}
+                        className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                      />
+                      <div>
+                        <div className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                          <ImageIcon className="w-3.5 h-3.5 text-amber-600" />
+                          <span>URL Gambar / Aset Kustom</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1 leading-snug">
+                          Menampilkan gambar dari URL atau aset proyek langsung pada halaman publik.
+                        </p>
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
+                {/* Static Asset Picker & Optional Temporary Device Test */}
+                {isManualOverride && (
+                  <div className="pt-2 border-t border-slate-200/80 space-y-3">
+                    <StaticAssetPicker
+                      selectedUrl={customThumbnailValue}
+                      compact
+                      title="Atau Pilih Cover dari Aset Statis Proyek Permanen (/images/...)"
+                      onSelect={(assetPath) => {
+                        setCustomThumbnailValue(assetPath);
+                        setIsManualOverride(true);
+                        setFormError(null);
+                      }}
+                    />
+
+                    <div className="pt-2 border-t border-slate-200/70 flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="inline-flex items-center gap-1.5 px-3 py-2 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer shadow-xs"
+                      >
+                        {isUploading ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-[#07529A]" />
+                        ) : (
+                          <FolderOpen className="w-3.5 h-3.5 text-amber-600" />
+                        )}
+                        <span>
+                          {isUploading
+                            ? 'Memproses Foto...'
+                            : 'Unggah File Gambar dari Perangkat (Disimpan ke Firestore)'}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCustomThumbnailValue('');
+                          setIsManualOverride(false);
+                          setThumbLoadState('idle');
+                          setThumbLoadError(undefined);
+                        }}
+                        className="text-xs text-slate-500 hover:text-slate-800 underline cursor-pointer"
+                      >
+                        Kembalikan ke Otomatis
+                      </button>
+                    </div>
+
+                    <UploadLimitationNotice isTemporaryActive={false} />
+
+                    {uploadError && (
+                      <p className="text-xs text-rose-600 font-semibold">{uploadError}</p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Step 6: Regulasi Terkait (JDIH / Dokumen Resmi) */}
@@ -1384,20 +1492,20 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  disabled={isSavingPolicy}
+                  disabled={isSaving}
                   onClick={() => handleSave('draft')}
-                  className="px-4 py-2 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 disabled:opacity-60 border border-amber-300 rounded-xl transition-colors cursor-pointer"
+                  className="px-4 py-2 text-xs font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 disabled:opacity-50 border border-amber-300 rounded-xl transition-colors cursor-pointer"
                 >
-                  {isSavingPolicy ? 'Menyimpan...' : 'Simpan Draf'}
+                  Simpan Draf
                 </button>
                 <button
                   type="button"
-                  disabled={isSavingPolicy}
+                  disabled={isSaving}
                   onClick={() => handleSave('published')}
                   className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
-                  <Save className="w-3.5 h-3.5" />
-                  <span>{isSavingPolicy ? 'Menyimpan ke Firestore...' : 'Simpan & Publikasikan'}</span>
+                  {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  <span>{isSaving ? 'Menyimpan...' : 'Simpan & Publikasikan'}</span>
                 </button>
               </div>
             </div>
@@ -1483,22 +1591,28 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                   )}
                 </div>
 
-                {/* Cluster Preview Tag */}
+                {/* Cluster / Pillar Preview Tag */}
                 <div className="flex items-center gap-1.5 text-xs text-slate-600">
-                  <span className="font-semibold text-slate-500 text-[11px]">Klaster:</span>
+                  <span className="font-semibold text-slate-500 text-[11px]">
+                    {selectedCluster?.group === 'pilar' ? 'Pilar Konten:' : 'Klaster:'}
+                  </span>
                   <span className="font-bold text-[#07529A] bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100 text-[11px]">
                     {selectedCluster?.name}
                   </span>
                 </div>
 
-                {/* Instagram Embed Component */}
+                {/* Live Media Preview (Direct Image URL and/or Instagram Embed) */}
                 <div className="py-1">
-                  <InstagramEmbed
-                    url={instagramPostUrl}
-                    thumbnail={effectiveThumbnail}
+                  <PolicyMediaFrame
+                    policy={{
+                      title: title || 'Pratinjau Konten',
+                      instagramPostUrl,
+                      thumbnail: effectiveThumbnail,
+                      customThumbnail: isManualOverride ? customThumbnailValue : undefined,
+                      isCustomThumbnail: Boolean(isManualOverride && customThumbnailValue.trim()),
+                    }}
                     clusterName={selectedCluster?.name}
-                    title={title || 'Pratinjau Konten Instagram'}
-                    hideHeader={false}
+                    variant="detail"
                   />
                 </div>
               </div>
@@ -1538,6 +1652,7 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
                     <img
                       src={effectiveThumbnail}
                       alt={title || 'Pratinjau'}
+                      referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                     />
                     <div className="absolute top-2.5 right-2.5 bg-slate-900/80 backdrop-blur-xs text-white px-2 py-0.5 rounded text-[10px] font-medium flex items-center gap-1">
@@ -1630,7 +1745,9 @@ export const AdminContentEditor: React.FC<AdminContentEditorProps> = ({
 
                   <div className="p-3 rounded-xl bg-white border border-slate-200 text-[11px] space-y-1.5">
                     <div className="flex items-center justify-between text-slate-500">
-                      <span>Klaster ASN:</span>
+                      <span>
+                        {selectedCluster?.group === 'pilar' ? 'Pilar Konten:' : 'Klaster ASN:'}
+                      </span>
                       <span className="font-bold text-[#07529A]">{selectedCluster?.name}</span>
                     </div>
                     <div className="flex items-center justify-between text-slate-500 pt-1 border-t border-slate-100">

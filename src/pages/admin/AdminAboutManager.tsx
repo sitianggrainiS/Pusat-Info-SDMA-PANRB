@@ -19,8 +19,21 @@ import {
   Link as LinkIcon,
 } from 'lucide-react';
 import { AdminLayout } from '../../components/admin/AdminLayout';
+import {
+  StaticAssetPicker,
+  UploadLimitationNotice,
+} from '../../components/admin/StaticAssetPicker';
+import {
+  UrlImagePreviewStatus,
+  ImagePreviewLoadState,
+} from '../../components/admin/UrlImagePreviewStatus';
+import { validateDirectImageUrl } from '../../utils/imageUrlUtils';
 import { usePolicy } from '../../context/PolicyContext';
-import { STORAGE_DISABLED_NOTICE } from '../../lib/storageService';
+import {
+  isTemporaryRuntimeUploadUrl,
+  normalizeStaticImageUrl,
+  readAndCompressLocalPreviewImage,
+} from '../../data/staticImages';
 import { AboutPageContent, AboutUnitWork } from '../../types';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -51,7 +64,7 @@ export const AdminAboutManager: React.FC = () => {
     aboutPage,
     isAboutPageLoading,
     aboutPageError,
-    isStorageEnabled,
+    isFirebaseVerifiedAdmin,
     refreshAboutPage,
     uploadAboutProfileImage,
     saveAboutPage,
@@ -76,6 +89,7 @@ export const AdminAboutManager: React.FC = () => {
   const [isResetting, setIsResetting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [aboutUrlLoadState, setAboutUrlLoadState] = useState<ImagePreviewLoadState>('idle');
 
   // Confirmation Modals
   const [showDeleteImageModal, setShowDeleteImageModal] = useState(false);
@@ -91,16 +105,26 @@ export const AdminAboutManager: React.FC = () => {
     }
   }, [aboutPage, hasUnsavedTextChanges]);
 
-  // Manage local ObjectURL lifecycle cleanly
+  // Manage local FileReader preview (never creates blob: URLs)
   useEffect(() => {
+    let cancelled = false;
     if (!pendingFile) {
       setPendingPreviewUrl(null);
       return;
     }
-    const objectUrl = URL.createObjectURL(pendingFile);
-    setPendingPreviewUrl(objectUrl);
+    readAndCompressLocalPreviewImage(pendingFile, 1200, 0.85)
+      .then((dataUrl) => {
+        if (!cancelled) {
+          setPendingPreviewUrl(dataUrl);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPendingPreviewUrl(null);
+        }
+      });
     return () => {
-      URL.revokeObjectURL(objectUrl);
+      cancelled = true;
     };
   }, [pendingFile]);
 
@@ -117,10 +141,6 @@ export const AdminAboutManager: React.FC = () => {
 
   const validateAndStageFile = (file: File) => {
     setErrorMessage(null);
-    if (!isStorageEnabled) {
-      setErrorMessage(STORAGE_DISABLED_NOTICE);
-      return;
-    }
 
     const lowerName = file.name.toLowerCase();
     const hasValidExt = ALLOWED_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
@@ -240,18 +260,41 @@ export const AdminAboutManager: React.FC = () => {
 
     try {
       setIsSaving(true);
-      let finalImageUrl = formState.profileImageUrl.trim();
 
-      if (finalImageUrl.startsWith('data:') || finalImageUrl.startsWith('blob:')) {
-        throw new Error(STORAGE_DISABLED_NOTICE);
+      // Ensure Firebase Authentication + Firestore UID authorization is active before writing
+      if (!isFirebaseVerifiedAdmin) {
+        throw new Error(
+          'Sesi Firebase Authentication Anda belum aktif atau UID belum terotorisasi di koleksi Firestore admins. Silakan keluar dan masuk kembali melalui Portal Admin.'
+        );
       }
 
-      // 1. If admin staged a new image file (only when Firebase Storage is enabled), upload first
+      const rawUrl = formState.profileImageUrl.trim();
+      let finalImageUrl = '';
+
+      // 1. If admin staged a file from device, compress for Cloud Firestore persistence
       if (pendingFile) {
         finalImageUrl = await uploadAboutProfileImage(pendingFile);
+      } else if (rawUrl) {
+        const check = validateDirectImageUrl(rawUrl, { allowEmpty: true, allowDataUrl: true });
+        if (!check.isValid) {
+          throw new Error(
+            check.error ||
+              'Path atau URL gambar tidak valid. Pilih dari Aset Proyek (/images/...) atau gunakan URL gambar resmi (https://...).'
+          );
+        }
+        const isLocalAsset =
+          check.cleanUrl.startsWith('/assets/') ||
+          check.cleanUrl.startsWith('/images/') ||
+          check.cleanUrl.startsWith('data:image/');
+        if (!isLocalAsset && aboutUrlLoadState === 'error') {
+          throw new Error(
+            'URL gambar gagal dimuat. Pastikan tautan mengarah langsung ke file gambar yang valid dan dapat diakses publik sebelum menyimpan.'
+          );
+        }
+        finalImageUrl = check.cleanUrl;
       }
 
-      // 2. Persist full Halaman Tentang content + URL metadata to Cloud Firestore
+      // 2. Persist Halaman Tentang content
       const payload: AboutPageContent = {
         ...formState,
         profileImageUrl: finalImageUrl,
@@ -265,10 +308,15 @@ export const AdminAboutManager: React.FC = () => {
       setFormState(saved);
       setPendingFile(null);
       setHasUnsavedTextChanges(false);
-      showToast('Perubahan Halaman Tentang berhasil disimpan dan dipublikasikan.');
+
+      showToast(
+        finalImageUrl
+          ? 'Perubahan Halaman Tentang beserta path gambar permanen berhasil disimpan.'
+          : 'Perubahan Halaman Tentang berhasil disimpan ke Cloud Firestore.'
+      );
     } catch (err: any) {
       console.error('Failed saving About page:', err);
-      setErrorMessage(err?.message || 'Gagal menyimpan perubahan ke server.');
+      setErrorMessage(err?.message || 'Gagal menyimpan perubahan ke Cloud Firestore.');
     } finally {
       setIsSaving(false);
     }
@@ -280,6 +328,7 @@ export const AdminAboutManager: React.FC = () => {
       setIsDeletingImage(true);
       const updated = await deleteAboutProfileImage();
       setPendingFile(null);
+      setAboutUrlLoadState('idle');
       setFormState((prev) => ({
         ...prev,
         profileImageUrl: updated.profileImageUrl,
@@ -481,6 +530,7 @@ export const AdminAboutManager: React.FC = () => {
                     <img
                       src={activeDisplayImageUrl}
                       alt="Pratinjau Gambar Profil Kedeputian SDMA"
+                      referrerPolicy="no-referrer"
                       className="w-full h-full object-cover"
                     />
                   ) : (
@@ -503,8 +553,51 @@ export const AdminAboutManager: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Upload Dropzone & Actions */}
+            {/* Right: Permanent Project Assets, External URL & Optional Preview Upload */}
             <div className="lg:col-span-6 space-y-4">
+              {/* 1. Primary Permanent Option: Static Project Assets (/images/...) */}
+              <StaticAssetPicker
+                selectedUrl={pendingFile ? '' : formState.profileImageUrl}
+                compact
+                title="Pilih Gambar Permanen dari Aset Proyek (/images/...)"
+                onSelect={(assetPath) => {
+                  setPendingFile(null);
+                  setAboutUrlLoadState('idle');
+                  updateTopField('profileImageUrl', assetPath);
+                  setErrorMessage(null);
+                }}
+              />
+
+              {/* 2. Static Path / External Image URL Input */}
+              <div className="space-y-1.5">
+                <label className="block text-xs font-bold text-slate-800">
+                  Path Aset Proyek (/images/...) atau URL Gambar Eksternal (https://...)
+                </label>
+                <div className="relative">
+                  <LinkIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={formState.profileImageUrl}
+                    onChange={(e) => {
+                      setPendingFile(null);
+                      setAboutUrlLoadState('idle');
+                      updateTopField('profileImageUrl', e.target.value);
+                    }}
+                    placeholder="/images/nama-gambar.jpg atau https://... (kosongkan untuk placeholder resmi)"
+                    className="w-full text-xs pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#07529A] focus:ring-2 focus:ring-[#07529A]/15 focus:outline-none"
+                  />
+                </div>
+                {!pendingFile && formState.profileImageUrl.trim() && (
+                  <UrlImagePreviewStatus
+                    imageUrl={formState.profileImageUrl}
+                    label="Status Muat URL Gambar Halaman Tentang"
+                    allowEmpty={true}
+                    onStatusChange={(st) => setAboutUrlLoadState(st)}
+                  />
+                )}
+              </div>
+
+              {/* 3. Optional Runtime Preview Upload Dropzone + Honest Limitation Notice */}
               <div
                 onDragOver={(e) => {
                   e.preventDefault();
@@ -513,59 +606,34 @@ export const AdminAboutManager: React.FC = () => {
                 onDragLeave={() => setIsDraggingOver(false)}
                 onDrop={handleDropFile}
                 onClick={() => fileInputRef.current?.click()}
-                className={`rounded-2xl border-2 border-dashed p-6 text-center transition-colors cursor-pointer ${
+                className={`rounded-2xl border-2 border-dashed p-4 text-center transition-colors cursor-pointer ${
                   isDraggingOver
                     ? 'border-[#07529A] bg-blue-50/60'
                     : 'border-slate-300 hover:border-[#07529A]/60 bg-slate-50/60 hover:bg-slate-50'
                 }`}
               >
-                <div className="w-11 h-11 rounded-2xl bg-white border border-slate-200 text-[#07529A] flex items-center justify-center mx-auto mb-3 shadow-2xs">
-                  <Upload className="w-5 h-5" />
+                <div className="w-9 h-9 rounded-xl bg-white border border-slate-200 text-[#07529A] flex items-center justify-center mx-auto mb-2 shadow-2xs">
+                  <Upload className="w-4 h-4" />
                 </div>
-                <p className="text-xs sm:text-sm font-bold text-slate-900">
-                  {aboutPage.profileImageUrl || pendingFile
-                    ? 'Klik atau tarik file ke sini untuk mengganti gambar'
-                    : 'Klik atau tarik file ke sini untuk mengunggah gambar profil'}
+                <p className="text-xs font-bold text-slate-900">
+                  Unggah File Gambar dari Perangkat (Disimpan Permanen di Cloud Firestore)
                 </p>
-                <p className="text-[11px] text-slate-500 mt-1">
-                  Format didukung: <strong>JPG, JPEG, PNG, WebP</strong> · Maksimal <strong>5 MB</strong>
-                </p>
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Rasio proporsional yang disarankan: 4:3 atau 16:10 (lanskap)
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Format: <strong>JPG, JPEG, PNG, WebP</strong> · Maksimal <strong>5 MB</strong>
                 </p>
               </div>
 
-              {!isStorageEnabled && (
-                <div className="rounded-xl bg-amber-50/90 border border-amber-200 px-3.5 py-2.5 text-[11px] text-amber-900 leading-relaxed">
-                  <strong>Mode Spark Plan (Gratis):</strong> Unggah file gambar langsung dinonaktifkan (
-                  <code className="font-mono">VITE_ENABLE_FIREBASE_STORAGE=false</code>) agar tidak memicu layanan berbayar. Gunakan kolom <strong>URL Gambar Eksternal</strong> di bawah untuk menyimpan tautan gambar sebagai metadata di Cloud Firestore.
-                </div>
-              )}
+              <UploadLimitationNotice
+                isTemporaryActive={false}
+              />
 
-              {/* External Image URL Metadata Input */}
-              <div className="space-y-1.5">
-                <label className="block text-xs font-bold text-slate-800">
-                  URL Gambar Profil Eksternal (Metadata Cloud Firestore)
-                </label>
-                <div className="relative">
-                  <LinkIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-                  <input
-                    type="url"
-                    value={formState.profileImageUrl}
-                    onChange={(e) => updateTopField('profileImageUrl', e.target.value)}
-                    placeholder="https://www.menpan.go.id/... (kosongkan untuk memakai placeholder resmi)"
-                    className="w-full text-xs pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 focus:border-[#07529A] focus:ring-2 focus:ring-[#07529A]/15 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Staged File Details (only active when VITE_ENABLE_FIREBASE_STORAGE=true) */}
-              {pendingFile && isStorageEnabled && (
-                <div className="rounded-xl bg-blue-50/70 border border-blue-200 p-3.5 flex items-center justify-between gap-3 text-xs">
+              {/* Staged File Details */}
+              {pendingFile && (
+                <div className="rounded-xl bg-amber-50/80 border border-amber-200 p-3.5 flex items-center justify-between gap-3 text-xs">
                   <div className="min-w-0">
                     <p className="font-bold text-slate-900 truncate">{pendingFile.name}</p>
-                    <p className="text-[11px] text-slate-600 font-mono tabular-nums">
-                      {formatBytes(pendingFile.size)} · Akan diunggah ke Firebase Storage saat klik Simpan Perubahan
+                    <p className="text-[11px] text-amber-900 font-mono tabular-nums">
+                      {formatBytes(pendingFile.size)} · Akan dikompresi dan disimpan ke Cloud Firestore saat klik Simpan
                     </p>
                   </div>
                   <button
@@ -580,19 +648,6 @@ export const AdminAboutManager: React.FC = () => {
 
               {/* Action Buttons Row */}
               <div className="flex flex-wrap items-center gap-2.5 pt-1">
-                {isStorageEnabled && (
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold transition-colors cursor-pointer"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>
-                      {aboutPage.profileImageUrl || pendingFile ? 'Ganti File Gambar' : 'Unggah File Gambar'}
-                    </span>
-                  </button>
-                )}
-
                 {pendingFile && (
                   <button
                     type="button"
@@ -605,11 +660,11 @@ export const AdminAboutManager: React.FC = () => {
                     ) : (
                       <Save className="w-3.5 h-3.5 text-[#FFD84D]" />
                     )}
-                    <span>{isSaving ? 'Menyimpan...' : 'Simpan & Publikasikan Gambar'}</span>
+                    <span>{isSaving ? 'Menyimpan...' : 'Simpan Gambar Uji Preview'}</span>
                   </button>
                 )}
 
-                {aboutPage.profileImageUrl && (
+                {(aboutPage.profileImageUrl || formState.profileImageUrl) && (
                   <button
                     type="button"
                     onClick={() => setShowDeleteImageModal(true)}
@@ -929,6 +984,27 @@ export const AdminAboutManager: React.FC = () => {
               );
             })}
           </div>
+
+          {/* Inline Error Alert near Bottom Save Button */}
+          {errorMessage && (
+            <div className="mx-5 sm:mx-6 my-4 rounded-2xl bg-rose-50 border border-rose-200 px-4 py-3 flex items-start justify-between gap-3 text-xs text-rose-800">
+              <div className="flex items-start gap-2.5">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="space-y-0.5">
+                  <p className="font-bold">Gagal Menyimpan Perubahan</p>
+                  <p className="leading-relaxed">{errorMessage}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="p-1 rounded-lg hover:bg-rose-100 text-rose-500 cursor-pointer shrink-0"
+                aria-label="Tutup pesan kesalahan"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           {/* Bottom Save Footer */}
           <div className="px-5 sm:px-6 py-4 bg-slate-50 border-t border-slate-200/80 flex flex-wrap items-center justify-between gap-3">

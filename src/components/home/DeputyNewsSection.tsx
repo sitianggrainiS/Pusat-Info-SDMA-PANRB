@@ -3,6 +3,7 @@ import { usePolicy } from '../../context/PolicyContext';
 import { DeputyNews } from '../../types';
 import {
   formatIndonesianNewsDate,
+  resolveDeputyNewsImageUrl,
   sortDeputyNewsNewestFirst,
 } from '../../utils/deputyNewsUtils';
 import { ScrollReveal } from '../common/ScrollReveal';
@@ -38,12 +39,12 @@ const NewsCardImage: React.FC<{ src: string; alt: string }> = ({ src, alt }) => 
   );
 };
 
-const DeputyNewsCard: React.FC<{ item: DeputyNews }> = ({ item }) => {
+const DeputyNewsCard: React.FC<{ item: DeputyNews; imageSrc: string }> = ({ item, imageSrc }) => {
   return (
     <article className="group bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 overflow-hidden flex flex-col h-full shadow-2xs transition-all duration-200 ease-out hover:-translate-y-1.5 hover:shadow-[0_18px_36px_-12px_rgba(7,82,154,0.13)] hover:border-[#07529A]/35">
       {/* Thumbnail */}
       <div className="aspect-16/10 w-full bg-slate-100 overflow-hidden border-b border-slate-100 relative">
-        <NewsCardImage src={item.thumbnailUrl} alt={item.title} />
+        <NewsCardImage src={imageSrc} alt={item.title} />
       </div>
 
       {/* Content */}
@@ -70,7 +71,13 @@ const DeputyNewsCard: React.FC<{ item: DeputyNews }> = ({ item }) => {
         {/* Action Button */}
         <div className="pt-5 mt-5 border-t border-slate-100 flex items-center justify-between gap-3">
           <span className="text-[11px] font-mono text-slate-400 font-medium truncate">
-            menpan.go.id
+            {(() => {
+              try {
+                return new URL(item.articleUrl).hostname.replace(/^www\./, '') || 'menpan.go.id';
+              } catch {
+                return 'menpan.go.id';
+              }
+            })()}
           </span>
           <motion.a
             whileHover={{ y: -1 }}
@@ -90,7 +97,7 @@ const DeputyNewsCard: React.FC<{ item: DeputyNews }> = ({ item }) => {
 };
 
 export const DeputyNewsSection: React.FC = () => {
-  const { deputyNews, isDeputyNewsLoading } = usePolicy();
+  const { deputyNews, deputyNewsImageUrls, isDeputyNewsLoading } = usePolicy();
 
   // Strictly show only 'published' news sorted by newest publicationDate first
   const publishedNews = useMemo(() => {
@@ -138,7 +145,7 @@ export const DeputyNewsSection: React.FC = () => {
         </ScrollReveal>
 
         {/* Loading State */}
-        {isDeputyNewsLoading && publishedNews.length === 0 ? (
+        {isDeputyNewsLoading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {[1, 2, 3].map((idx) => (
               <div
@@ -159,7 +166,11 @@ export const DeputyNewsSection: React.FC = () => {
           /* Populated News Cards Grid */
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-stretch">
             {publishedNews.map((item) => (
-              <DeputyNewsCard key={item.id} item={item} />
+              <DeputyNewsCard
+                key={item.id}
+                item={item}
+                imageSrc={resolveDeputyNewsImageUrl(item, deputyNewsImageUrls)}
+              />
             ))}
           </div>
         ) : (

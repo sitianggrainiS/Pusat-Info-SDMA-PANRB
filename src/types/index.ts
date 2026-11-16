@@ -111,6 +111,7 @@ export interface AdminPermissions {
 }
 
 export interface AdminUser {
+  uid?: string;
   id: string;
   name: string;
   email: string;
@@ -118,6 +119,7 @@ export interface AdminUser {
   roleTitle?: string;
   department?: string;
   permissions?: AdminPermissions;
+  isActive?: boolean;
 }
 
 export interface AIAnalysisResult {
@@ -147,6 +149,7 @@ export interface DeputyNews {
   id: string;
   title: string;
   articleUrl: string;
+  imageId?: string;
   thumbnailUrl: string;
   publicationDate: string; // YYYY-MM-DD
   summary: string;
@@ -159,6 +162,8 @@ export interface DeputyNews {
 export interface DeputyNewsInput {
   title: string;
   articleUrl: string;
+  imageFile?: File | Blob | null;
+  imageId?: string;
   thumbnailUrl: string;
   publicationDate: string;
   summary: string;

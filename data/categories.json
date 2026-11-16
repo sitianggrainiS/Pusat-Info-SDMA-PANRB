@@ -1,0 +1,106 @@
+[
+  {
+    "id": "cat-perencanaan-pengadaan",
+    "name": "Perencanaan Kebutuhan dan Pengadaan ASN",
+    "slug": "perencanaan-kebutuhan-dan-pengadaan-asn",
+    "description": "Penyusunan kebijakan formasi nasional berbasis prioritas rencana pembangunan nasional (RPJMN) dan Kebijakan Rekrutmen Pegawai ASN.",
+    "iconName": "UserCheck",
+    "group": "klaster"
+  },
+  {
+    "id": "cat-budaya-kerja",
+    "name": "Penguatan Budaya Kerja dan Citra Institusi",
+    "slug": "penguatan-budaya-kerja-dan-citra-institusi",
+    "description": "Internalisasi kode etik, kode perilaku, dan nilai dasar tunggal (core values) BerAKHLAK sebagai panduan perilaku pegawai.",
+    "iconName": "ShieldCheck",
+    "group": "klaster"
+  },
+  {
+    "id": "cat-pengelolaan-kinerja",
+    "name": "Pengelolaan Kinerja",
+    "slug": "pengelolaan-kinerja",
+    "description": "Pengukuran pencapaian target dan sasaran organisasi melalui dialog kinerja yang fleksibel, kolaboratif, dan terukur.",
+    "iconName": "Target",
+    "group": "klaster"
+  },
+  {
+    "id": "cat-talenta-karier",
+    "name": "Pengembangan Talenta dan Karier",
+    "slug": "pengembangan-talenta-dan-karier",
+    "description": "Pengaturan mobilitas pegawai (rotasi, mutasi, promosi) yang mempertimbangkan kualifikasi, kompetensi, dan kinerja melalui Manajemen Talenta.",
+    "iconName": "TrendingUp",
+    "group": "klaster"
+  },
+  {
+    "id": "cat-pengembangan-kompetensi",
+    "name": "Pengembangan Kompetensi",
+    "slug": "pengembangan-kompetensi",
+    "description": "Kewajiban pemenuhan pembelajaran berkelanjutan bagi pegawai melalui sistem pembelajaran terintegrasi (ASN Corporate University).",
+    "iconName": "GraduationCap",
+    "group": "klaster"
+  },
+  {
+    "id": "cat-penghargaan-pengakuan",
+    "name": "Pemberian Penghargaan dan Pengakuan",
+    "slug": "pemberian-penghargaan-dan-pengakuan",
+    "description": "Skema apresiasi materiil maupun nonmateriil (gaji, tunjangan, jaminan sosial, bantuan hukum, dan pengembangan diri) secara adil dan kompetitif.",
+    "iconName": "Award",
+    "group": "klaster"
+  },
+  {
+    "id": "cat-pemberhentian",
+    "name": "Pemberhentian",
+    "slug": "pemberhentian",
+    "description": "Pemutusan hubungan kerja pegawai secara bermartabat sesuai ketentuan peraturan perundang-undangan.",
+    "iconName": "Briefcase",
+    "group": "klaster"
+  },
+  {
+    "id": "cat-sistem-merit",
+    "name": "Penguatan Implementasi Sistem Merit",
+    "slug": "penguatan-implementasi-sistem-merit",
+    "description": "Informasi terkait pelaksanaan pengukuran sistem merit pada Instansi Pemerintah.",
+    "iconName": "Sparkles",
+    "group": "klaster"
+  },
+  {
+    "id": "cat-sekolah-kedinasan",
+    "name": "Sekolah Kedinasan",
+    "slug": "sekolah-kedinasan",
+    "description": "Informasi kebijakan seleksi, alokasi formasi, tata kelola pendidikan, dan pemenuhan kebutuhan calon aparatur melalui Perguruan Tinggi Kedinasan.",
+    "iconName": "School",
+    "group": "pilar"
+  },
+  {
+    "id": "cat-fun-content",
+    "name": "Fun Content",
+    "slug": "fun-content",
+    "description": "Konten kreatif, interaktif, dan menghibur seputar dunia kerja ASN, serba-serbi kepegawaian, serta edukasi ringan yang dekat dengan keseharian aparatur.",
+    "iconName": "Smile",
+    "group": "pilar"
+  },
+  {
+    "id": "cat-greetings",
+    "name": "Greetings",
+    "slug": "greetings",
+    "description": "Ucapan resmi hari besar nasional, peringatan hari penting, serta apresiasi institusional dari Kedeputian Bidang SDM Aparatur.",
+    "iconName": "CalendarHeart",
+    "group": "pilar"
+  },
+  {
+    "id": "cat-quiz",
+    "name": "Quiz",
+    "slug": "quiz",
+    "description": "Kuis interaktif, tebak regulasi, dan tantangan pengetahuan seputar kebijakan manajemen ASN untuk menguji pemahaman publik.",
+    "iconName": "HelpCircle",
+    "group": "pilar"
+  },
+  {
+    "id": "cat-collab",
+    "name": "Collab",
+    "slug": "collab",
+    "description": "Konten kolaborasi lintas instansi pemerintah, kementerian/lembaga, serta pemangku kepentingan ekosistem SDM Aparatur.",
+    "iconName": "Handshake",
+    "group": "pilar"
+  }
+]

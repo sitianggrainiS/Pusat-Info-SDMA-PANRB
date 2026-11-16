@@ -17,6 +17,10 @@ import {
   extractInstagramDateFromUrl,
   resolvePolicyReleaseDate,
 } from '../../utils/instagramUtils';
+import {
+  isInstagramWebPageUrl,
+  validateDirectImageUrl,
+} from '../../utils/imageUrlUtils';
 
 export {
   extractInstagramInfo,
@@ -38,49 +42,74 @@ export const InstagramEmbed: React.FC<InstagramEmbedProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const info = extractInstagramInfo(url, captioned);
 
-  // Initialize official instgrm embed script if available
+  // Manage embed states on URL change
   useEffect(() => {
     if (!info.isValid) return;
 
     // Reset loading state on URL change
     setIsLoading(true);
     setLoadError(false);
-
-    const processEmbeds = () => {
-      if ((window as any).instgrm?.Embeds) {
-        (window as any).instgrm.Embeds.process();
-      }
-    };
-
-    if (!(window as any).instgrm) {
-      const existing = document.getElementById('instagram-embed-script');
-      if (!existing) {
-        const script = document.createElement('script');
-        script.id = 'instagram-embed-script';
-        script.src = 'https://www.instagram.com/embed.js';
-        script.async = true;
-        script.onload = () => {
-          processEmbeds();
-        };
-        script.onerror = () => {
-          // Fallback to iframe is still active
-        };
-        document.body.appendChild(script);
-      }
-    } else {
-      processEmbeds();
-    }
   }, [info.cleanUrl]);
 
+  const [thumbError, setThumbError] = useState(false);
+
+  useEffect(() => {
+    setThumbError(false);
+  }, [url, thumbnail]);
+
+  // Distinguish direct image URLs from Instagram post/reel embed URLs
+  const trimmedUrl = (url || '').trim();
+  const isDirectImageInUrl =
+    Boolean(trimmedUrl) &&
+    !info.isValid &&
+    !isInstagramWebPageUrl(trimmedUrl) &&
+    validateDirectImageUrl(trimmedUrl).isValid;
+
+  const validThumbnailCheck = validateDirectImageUrl(thumbnail || '');
+  const resolvedDirectImage = isDirectImageInUrl
+    ? validateDirectImageUrl(trimmedUrl).cleanUrl
+    : validThumbnailCheck.isValid
+    ? validThumbnailCheck.cleanUrl
+    : '';
+
   if (!url || !info.isValid) {
+    if (resolvedDirectImage && !thumbError) {
+      return (
+        <div className={`w-full max-w-[540px] mx-auto ${className}`}>
+          {!hideHeader && (
+            <div className="w-full flex items-center justify-between text-xs text-slate-500 mb-2 px-1 min-w-0">
+              <div className="flex items-center gap-1.5 font-medium text-slate-700 truncate">
+                <Instagram className="w-4 h-4 text-[#E1306C] shrink-0" />
+                <span className="truncate">{title || 'Visual Konten'}</span>
+              </div>
+              {clusterName && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-blue-50 text-[#07529A] border border-blue-200 truncate ml-2">
+                  {clusterName}
+                </span>
+              )}
+            </div>
+          )}
+          <div className="relative aspect-4/3 w-full rounded-2xl overflow-hidden bg-slate-100 border border-slate-200/90 shadow-2xs">
+            <img
+              src={resolvedDirectImage}
+              alt={title || 'Gambar Konten KOMPAK SDMA'}
+              referrerPolicy="no-referrer"
+              onError={() => setThumbError(true)}
+              className="w-full h-full object-cover"
+            />
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className={`p-6 rounded-2xl bg-slate-50 border border-slate-200 text-center space-y-2 ${className}`}>
         <Instagram className="w-8 h-8 text-slate-400 mx-auto" />
         <p className="text-xs text-slate-500 font-medium">
-          Masukkan URL postingan, karusel, atau Reel Instagram yang valid untuk melihat pratinjau.
+          Masukkan URL postingan Instagram (embed) atau URL gambar langsung untuk melihat pratinjau.
         </p>
         <p className="text-[11px] font-mono text-slate-400 break-all">
-          Contoh: https://www.instagram.com/p/Ddi76RtGXeH/
+          Contoh: https://www.instagram.com/p/Ddi76RtGXeH/ atau https://.../gambar.jpg
         </p>
       </div>
     );
@@ -121,14 +150,12 @@ export const InstagramEmbed: React.FC<InstagramEmbedProps> = ({
             <iframe
               key={`${info.cleanUrl}-${captioned ? 'cap' : 'nocap'}`}
               src={info.embedUrl}
-              className={`w-full max-w-full border-0 transition-opacity duration-200 ${
+              className={`w-full max-w-full border-none transition-opacity duration-200 ${
                 captioned
                   ? 'min-h-[500px] sm:min-h-[600px]'
                   : 'min-h-[400px] sm:min-h-[475px]'
               }`}
-              frameBorder="0"
-              scrolling="no"
-              allowTransparency={true}
+              loading="lazy"
               allow="encrypted-media"
               onLoad={() => setIsLoading(false)}
               onError={() => {

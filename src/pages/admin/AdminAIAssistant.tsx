@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
+import { getTodayIndonesianDate } from '../../utils/dateUtils';
 import { AdminLayout } from '../../components/admin/AdminLayout';
 import { SAMPLE_DOCUMENTS } from '../../data/initialData';
 import { AIAnalysisResult } from '../../types';
@@ -29,6 +30,12 @@ export const AdminAIAssistant: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [warningMsg, setWarningMsg] = useState<string | null>(null);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+
+  useEffect(() => {
+    if (!selectedCategoryId && categories.length > 0) {
+      setSelectedCategoryId(categories[0].id);
+    }
+  }, [categories, selectedCategoryId]);
 
   // File upload simulation/handling
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -151,7 +158,7 @@ export const AdminAIAssistant: React.FC = () => {
     try {
       setIsSavingDraft(true);
       setErrorMsg(null);
-      // Create a new policy draft with AI assistance flag in Cloud Firestore
+      // Create a new policy draft with AI assistance flag
       const newPolicy = await createPolicy({
         title: documentTitle || 'Kebijakan Hasil Ekstraksi AI',
         categoryId: selectedCategoryId,
@@ -167,17 +174,14 @@ export const AdminAIAssistant: React.FC = () => {
         faqs: analysisResult.faqs,
         status: 'draft', // NEVER AUTO-PUBLISH PER RULE!
         aiAssisted: true,
-        thumbnail: '/src/assets/images/infographic_naik_pangkat_1790755802597.jpg',
-        instagramDate: new Date().toLocaleDateString('id-ID', {
-          day: 'numeric',
-          month: 'long',
-          year: 'numeric',
-        }),
+        thumbnail: '/images/infographic_naik_pangkat_1790755802597.jpg',
+        instagramDate: getTodayIndonesianDate(),
+        publicationDate: getTodayIndonesianDate(),
       });
 
       navigateTo({ name: 'admin-editor', policyId: newPolicy.id });
     } catch (err: any) {
-      setErrorMsg(err?.message || 'Gagal menyimpan draf kebijakan ke Cloud Firestore.');
+      setErrorMsg(err?.message || 'Gagal menyimpan draf kebijakan.');
     } finally {
       setIsSavingDraft(false);
     }
@@ -254,11 +258,26 @@ export const AdminAIAssistant: React.FC = () => {
                 onChange={(e) => setSelectedCategoryId(e.target.value)}
                 className="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-300 focus:border-[#07529A] focus:outline-none bg-white"
               >
-                {categories.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
+                <optgroup label="8 Klaster Manajemen ASN">
+                  {categories
+                    .filter((c) => c.group !== 'pilar')
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                </optgroup>
+                {categories.some((c) => c.group === 'pilar') && (
+                  <optgroup label="Pilar Konten">
+                    {categories
+                      .filter((c) => c.group === 'pilar')
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                  </optgroup>
+                )}
               </select>
             </div>
           </div>

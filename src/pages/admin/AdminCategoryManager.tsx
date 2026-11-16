@@ -48,7 +48,9 @@ export const AdminCategoryManager: React.FC = () => {
   const [slug, setSlug] = useState('');
   const [description, setDescription] = useState('');
   const [iconName, setIconName] = useState('Award');
+  const [group, setGroup] = useState<'klaster' | 'pilar'>('pilar');
   const [formError, setFormError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Toast notification state
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -73,6 +75,11 @@ export const AdminCategoryManager: React.FC = () => {
     'TrendingUp',
     'GraduationCap',
     'School',
+    'Smile',
+    'CalendarHeart',
+    'HelpCircle',
+    'Handshake',
+    'Megaphone',
     'Landmark',
     'Award',
     'Briefcase',
@@ -106,7 +113,8 @@ export const AdminCategoryManager: React.FC = () => {
     setName('');
     setSlug('');
     setDescription('');
-    setIconName('Award');
+    setIconName('Smile');
+    setGroup('pilar');
     setFormError(null);
   };
 
@@ -118,6 +126,7 @@ export const AdminCategoryManager: React.FC = () => {
     setSlug(cat.slug);
     setDescription(cat.description);
     setIconName(cat.iconName || 'Award');
+    setGroup(cat.group || 'klaster');
     setFormError(null);
   };
 
@@ -139,9 +148,9 @@ export const AdminCategoryManager: React.FC = () => {
     const finalSlug = slug.trim() ? generateSlug(slug) : generateSlug(trimmedName);
 
     try {
+      setIsSubmitting(true);
       setFormError(null);
       if (isAdding) {
-        // Check for duplicate slug
         const slugExists = categories.some((c) => c.slug === finalSlug);
         const uniqueSlug = slugExists ? `${finalSlug}-${Date.now().toString().slice(-4)}` : finalSlug;
 
@@ -150,11 +159,11 @@ export const AdminCategoryManager: React.FC = () => {
           slug: uniqueSlug,
           description: description.trim(),
           iconName,
+          group,
         });
 
         showToast(`Topik "${created.name}" berhasil disimpan ke Cloud Firestore!`, 'success');
       } else if (editingCategory) {
-        // Check for duplicate slug among other categories
         const slugExists = categories.some(
           (c) => c.slug === finalSlug && c.id !== editingCategory.id
         );
@@ -165,6 +174,7 @@ export const AdminCategoryManager: React.FC = () => {
           slug: uniqueSlug,
           description: description.trim(),
           iconName,
+          group,
         });
 
         showToast(`Topik "${trimmedName}" berhasil diperbarui di Cloud Firestore!`, 'success');
@@ -173,6 +183,8 @@ export const AdminCategoryManager: React.FC = () => {
       cancelForm();
     } catch (err: any) {
       setFormError(err?.message || 'Gagal menyimpan topik ke Cloud Firestore.');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -201,12 +213,13 @@ export const AdminCategoryManager: React.FC = () => {
     const attachedCount = policies.filter((p) => p.categoryId === deletingCategory.id).length;
 
     try {
+      setIsSubmitting(true);
       await deleteCategory(deletingCategory.id, reassignTargetId || undefined);
 
       if (attachedCount > 0 && reassignTargetId) {
         const targetCat = categories.find((c) => c.id === reassignTargetId);
         showToast(
-          `Topik "${catName}" dihapus. Sebanyak ${attachedCount} kebijakan dialihkan ke "${targetCat?.name || 'topik lain'}".`,
+          `Topik "${catName}" dihapus dari Firestore. Sebanyak ${attachedCount} kebijakan dialihkan ke "${targetCat?.name || 'topik lain'}".`,
           'info'
         );
       } else {
@@ -217,21 +230,26 @@ export const AdminCategoryManager: React.FC = () => {
     } catch (err: any) {
       cancelDelete();
       showToast(err?.message || 'Gagal menghapus topik dari Cloud Firestore.', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // Reset to default 8 Klaster + Pilar Sekolah Kedinasan
+  // Reset to default 8 Klaster + Pilar Konten standar
   const handleResetToDefault = async () => {
     try {
+      setIsSubmitting(true);
       await resetCategoriesToDefault();
       setShowResetConfirm(false);
       showToast(
-        'Kategori telah dikembalikan ke 8 Klaster Manajemen ASN & Pilar Sekolah Kedinasan standar di Cloud Firestore.',
+        'Kategori telah dikembalikan ke 8 Klaster Manajemen ASN & 5 Pilar Konten standar di Cloud Firestore.',
         'success'
       );
     } catch (err: any) {
       setShowResetConfirm(false);
-      showToast(err?.message || 'Gagal mereset kategori ke Cloud Firestore.', 'error');
+      showToast(err?.message || 'Gagal memulihkan topik standar ke Cloud Firestore.', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -350,7 +368,7 @@ export const AdminCategoryManager: React.FC = () => {
                 type="button"
                 onClick={() => setShowResetConfirm(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition-colors cursor-pointer"
-                title="Pulihkan susunan 8 Klaster Manajemen ASN & Pilar Sekolah Kedinasan bawaan"
+                title="Pulihkan susunan 8 Klaster Manajemen ASN & Pilar Konten bawaan"
               >
                 <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
                 <span className="hidden sm:inline">Pulihkan Standar</span>
@@ -450,8 +468,38 @@ export const AdminCategoryManager: React.FC = () => {
               {/* Form Fields */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Jenis Kelompok Topik *
+                  </label>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setGroup('pilar')}
+                      className={`px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-left ${
+                        group === 'pilar'
+                          ? 'bg-blue-50/90 border-[#07529A] text-[#07529A] ring-2 ring-[#07529A]/10'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      Pilar Konten (Non-Klaster)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setGroup('klaster')}
+                      className={`px-3.5 py-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer text-left ${
+                        group === 'klaster'
+                          ? 'bg-blue-50/90 border-[#07529A] text-[#07529A] ring-2 ring-[#07529A]/10'
+                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                      }`}
+                    >
+                      Klaster Manajemen ASN
+                    </button>
+                  </div>
+                </div>
+
+                <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Nama Topik (Klaster Manajemen ASN) *
+                    Nama Topik ({group === 'pilar' ? 'Pilar Konten' : 'Klaster Manajemen ASN'}) *
                   </label>
                   <input
                     type="text"
@@ -464,7 +512,11 @@ export const AdminCategoryManager: React.FC = () => {
                         setSlug(generateSlug(e.target.value));
                       }
                     }}
-                    placeholder="Contoh: Perencanaan Kebutuhan dan Pengadaan ASN"
+                    placeholder={
+                      group === 'pilar'
+                        ? 'Contoh: Fun Content'
+                        : 'Contoh: Perencanaan Kebutuhan dan Pengadaan ASN'
+                    }
                     className="w-full text-xs font-medium px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-[#07529A] focus:outline-none"
                   />
                 </div>
@@ -535,11 +587,12 @@ export const AdminCategoryManager: React.FC = () => {
                 </button>
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={handleSave}
-                  className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-5 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Save className="w-3.5 h-3.5" />
-                  <span>Simpan Topik</span>
+                  <span>{isSubmitting ? 'Menyimpan...' : 'Simpan Topik'}</span>
                 </button>
               </div>
             </div>
@@ -639,11 +692,12 @@ export const AdminCategoryManager: React.FC = () => {
                 </button>
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={confirmDelete}
-                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Hapus Topik</span>
+                  <span>{isSubmitting ? 'Menghapus...' : 'Hapus Topik'}</span>
                 </button>
               </div>
             </div>
@@ -675,7 +729,7 @@ export const AdminCategoryManager: React.FC = () => {
               </div>
 
               <p className="text-xs text-slate-600 leading-relaxed">
-                Apakah Anda ingin mengembalikan daftar topik menjadi <strong>8 Klaster Manajemen ASN & Pilar Konten Sekolah Kedinasan standar</strong>? Perubahan kustom pada kategori topik akan disesuaikan kembali ke definisi resmi.
+                Apakah Anda ingin mengembalikan daftar topik menjadi <strong>8 Klaster Manajemen ASN & 5 Pilar Konten (Sekolah Kedinasan, Fun Content, Greetings, Quiz, & Collab) standar</strong>? Perubahan kustom pada kategori topik akan disesuaikan kembali ke definisi resmi.
               </p>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
@@ -688,10 +742,11 @@ export const AdminCategoryManager: React.FC = () => {
                 </button>
                 <button
                   type="button"
+                  disabled={isSubmitting}
                   onClick={handleResetToDefault}
-                  className="px-4 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] rounded-xl shadow-xs transition-colors cursor-pointer"
+                  className="px-4 py-2 text-xs font-bold text-white bg-[#07529A] hover:bg-[#053d73] disabled:opacity-60 rounded-xl shadow-xs transition-colors cursor-pointer"
                 >
-                  Ya, Pulihkan Standar
+                  {isSubmitting ? 'Memulihkan...' : 'Ya, Pulihkan Standar'}
                 </button>
               </div>
             </div>

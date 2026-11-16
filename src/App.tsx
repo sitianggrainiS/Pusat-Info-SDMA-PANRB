@@ -5,9 +5,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertTriangle, RefreshCw } from 'lucide-react';
 import { PolicyProvider, usePolicy } from './context/PolicyContext';
-import { FirestoreErrorBoundary } from './components/common/FirestoreErrorBoundary';
+import { AppErrorBoundary } from './components/common/AppErrorBoundary';
 import { Header } from './components/common/Header';
 import { Footer } from './components/common/Footer';
 import { SearchModal } from './components/search/SearchModal';
@@ -28,15 +27,7 @@ import { AdminSourceManager } from './pages/admin/AdminSourceManager';
 import { AdminAboutManager } from './pages/admin/AdminAboutManager';
 
 function AppContent() {
-  const {
-    currentRoute,
-    adminUser,
-    isAuthReady,
-    isDataStale,
-    syncStatusMessage,
-    isRetryingFirestore,
-    retryFirestoreConnection,
-  } = usePolicy();
+  const { currentRoute, adminUser, isAuthLoading } = usePolicy();
   const [searchModalOpen, setSearchModalOpen] = useState(false);
 
   const isAdminRoute = currentRoute.name.startsWith('admin-') && currentRoute.name !== 'admin-login';
@@ -63,7 +54,8 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handleGlobalSearchShortcut);
   }, []);
 
-  if (isAdminRoute && !isAuthReady) {
+  // Wait for Firebase Auth + Firestore UID verification before gating admin routes
+  if (isAdminRoute && isAuthLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] text-slate-600 text-xs font-semibold">
         Memverifikasi sesi Firebase Authentication...
@@ -85,29 +77,12 @@ function AppContent() {
     );
   }
 
+  const perms = adminUser?.permissions;
+  const isSuperAdmin = adminUser?.role === 'superadmin' || Boolean(perms?.canManageUsers);
+
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC] text-[#0F172A]">
       {!isAdminRoute && <Header onOpenSearch={() => setSearchModalOpen(true)} />}
-
-      {!isAdminRoute && isDataStale && syncStatusMessage && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 sm:px-6 lg:px-8 py-2 text-xs text-amber-950">
-          <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-600" />
-              <span>{syncStatusMessage}</span>
-            </div>
-            <button
-              type="button"
-              disabled={isRetryingFirestore}
-              onClick={() => retryFirestoreConnection()}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white hover:bg-amber-100 border border-amber-300 text-amber-900 font-bold text-[11px] transition-colors cursor-pointer disabled:opacity-60"
-            >
-              <RefreshCw className={`w-3 h-3 ${isRetryingFirestore ? 'animate-spin' : ''}`} />
-              <span>{isRetryingFirestore ? 'Menyinkronkan...' : 'Muat Ulang Data'}</span>
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Main Dynamic View with Lightweight Compositor Route Transition */}
       <main className="flex-1 flex flex-col min-w-0">
@@ -121,13 +96,25 @@ function AppContent() {
               case 'admin-editor':
                 return <AdminContentEditor policyId={currentRoute.policyId} />;
               case 'admin-ai-assistant':
-                return <AdminAIAssistant />;
+                return isSuperAdmin || perms?.canUseAI ? <AdminAIAssistant /> : <AdminDashboard />;
               case 'admin-categories':
-                return <AdminCategoryManager />;
+                return isSuperAdmin || perms?.canEditCategories ? (
+                  <AdminCategoryManager />
+                ) : (
+                  <AdminDashboard />
+                );
               case 'admin-sources':
-                return <AdminSourceManager />;
+                return isSuperAdmin || perms?.canManageSources ? (
+                  <AdminSourceManager />
+                ) : (
+                  <AdminDashboard />
+                );
               case 'admin-about':
-                return <AdminAboutManager />;
+                return isSuperAdmin || perms?.canPublishPolicies ? (
+                  <AdminAboutManager />
+                ) : (
+                  <AdminDashboard />
+                );
               default:
                 return <AdminDashboard />;
             }
@@ -182,10 +169,10 @@ function AppContent() {
 
 export default function App() {
   return (
-    <FirestoreErrorBoundary>
+    <AppErrorBoundary>
       <PolicyProvider>
         <AppContent />
       </PolicyProvider>
-    </FirestoreErrorBoundary>
+    </AppErrorBoundary>
   );
 }

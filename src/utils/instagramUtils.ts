@@ -98,19 +98,6 @@ export function extractInstagramInfo(rawUrl: string, captioned: boolean = true) 
     };
   }
 
-  if (trimmed.includes('instagram.com')) {
-    const clean = trimmed.split('?')[0].replace(/\/+$/, '') + '/';
-    return {
-      isValid: true,
-      cleanUrl: clean,
-      shortcode: '',
-      accountHandle: '',
-      detectedDate: null as string | null,
-      type: 'post' as const,
-      embedUrl: `${clean}${embedSuffix}`,
-    };
-  }
-
   return {
     isValid: false,
     cleanUrl: trimmed,
@@ -127,11 +114,12 @@ export function extractInstagramDateFromUrl(rawUrl?: string): string | null {
   return extractInstagramInfo(rawUrl).detectedDate;
 }
 
+import { formatContentDate } from './dateUtils';
+
 /**
- * Resolves the accurate release date for an inputted policy item:
- * - Honors any explicitly inputted/edited date by the admin.
- * - If a newly created item's stored date was merely the untouched creation-day default
- *   while the inputted Instagram URL encodes the real upload date, returns the post's real upload date.
+ * Resolves the release date for a policy item:
+ * - Strictly honors the inputted/stored date (instagramDate or publicationDate) without overriding it.
+ * - Only falls back to Instagram shortcode date if no date was inputted at all.
  */
 export function resolvePolicyReleaseDate(policy: {
   instagramDate?: string;
@@ -141,27 +129,10 @@ export function resolvePolicyReleaseDate(policy: {
   updatedAt?: string;
 }): string {
   const storedDate = policy.instagramDate?.trim() || policy.publicationDate?.trim() || '';
+  if (storedDate) {
+    return formatContentDate(storedDate) || storedDate;
+  }
+
   const urlDate = extractInstagramDateFromUrl(policy.instagramPostUrl);
-
-  if (!storedDate) {
-    return urlDate || '-';
-  }
-
-  if (urlDate && urlDate !== storedDate && policy.createdAt) {
-    const createdObj = new Date(policy.createdAt);
-    if (!Number.isNaN(createdObj.getTime())) {
-      const createdDayWib = formatDateIndonesianWib(createdObj);
-      const createdDayLocal = createdObj.toLocaleDateString('id-ID', {
-        day: 'numeric',
-        month: 'long',
-        year: 'numeric',
-      });
-      const wasNeverEdited = !policy.updatedAt || policy.updatedAt === policy.createdAt;
-      if (wasNeverEdited && (storedDate === createdDayWib || storedDate === createdDayLocal)) {
-        return urlDate;
-      }
-    }
-  }
-
-  return storedDate;
+  return urlDate || '-';
 }

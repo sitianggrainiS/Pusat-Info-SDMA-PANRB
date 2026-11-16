@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { usePolicy } from '../context/PolicyContext';
 import { CategoryIcon } from '../components/common/CategoryIcon';
-import { InstagramEmbed, resolvePolicyReleaseDate } from '../components/common/InstagramEmbed';
+import { PolicyMediaFrame } from '../components/policy/PolicyMediaFrame';
+import { resolvePolicyMedia } from '../utils/imageUrlUtils';
+import { getPolicyDisplayDate, sortPoliciesByInputDate } from '../utils/dateUtils';
 import {
   FeedLayoutSwitcher,
   FeedLayoutOption,
@@ -35,9 +37,9 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({ slug }) 
   if (!category) {
     return (
       <div className="py-20 text-center max-w-lg mx-auto px-4">
-        <h2 className="text-xl font-bold text-slate-800">Klaster Tidak Ditemukan</h2>
+        <h2 className="text-xl font-bold text-slate-800">Kategori / Topik Tidak Ditemukan</h2>
         <p className="text-xs sm:text-sm text-slate-500 mt-2">
-          Klaster manajemen ASN yang Anda cari tidak tersedia atau telah dipindahkan.
+          Klaster manajemen ASN atau pilar konten yang Anda cari tidak tersedia atau telah dipindahkan.
         </p>
         <button
           type="button"
@@ -50,8 +52,9 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({ slug }) 
     );
   }
 
-  const categoryPolicies = policies.filter(
-    (p) => p.categoryId === category.id && p.status === 'published'
+  const categoryPolicies = sortPoliciesByInputDate(
+    policies.filter((p) => p.categoryId === category.id && p.status === 'published'),
+    'newest'
   );
 
   return (
@@ -80,7 +83,11 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({ slug }) 
 
             <div className="space-y-2 flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#07529A]">
-                <span>8 Klaster Manajemen ASN</span>
+                <span>
+                  {category.group === 'pilar'
+                    ? 'Pilar Konten SDM Aparatur'
+                    : '8 Klaster Manajemen ASN'}
+                </span>
                 <span aria-hidden="true">·</span>
                 <span className="text-slate-500 tabular-nums">
                   {categoryPolicies.length} Konten Instagram
@@ -125,71 +132,78 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({ slug }) 
 
           {categoryPolicies.length > 0 ? (
             <div className={getFeedGridClass(feedLayout)}>
-              {categoryPolicies.map((policy) => (
-                <div
-                  key={policy.id}
-                  className={`bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs hover:shadow-[0_16px_32px_-12px_rgba(7,82,154,0.1)] hover:border-[#07529A]/30 transition-all duration-200 overflow-hidden ${
-                    feedLayout === 'small' ? 'p-4 space-y-3' : 'p-5 sm:p-6 space-y-4'
-                  }`}
-                >
-                  {/* Header info */}
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
-                        <span className="font-semibold text-[#07529A] truncate">
-                          {category.name}
-                        </span>
-                        <span>·</span>
-                        <span className="shrink-0">{resolvePolicyReleaseDate(policy)}</span>
+              {categoryPolicies.map((policy) => {
+                const media = resolvePolicyMedia(policy);
+                return (
+                  <div
+                    key={policy.id}
+                    className={`bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 shadow-2xs hover:shadow-[0_16px_32px_-12px_rgba(7,82,154,0.1)] hover:border-[#07529A]/30 transition-all duration-200 overflow-hidden ${
+                      feedLayout === 'small' ? 'p-4 space-y-3' : 'p-5 sm:p-6 space-y-4'
+                    }`}
+                  >
+                    {/* Header info */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 text-xs text-slate-500 mb-1">
+                          <span className="font-semibold text-[#07529A] truncate">
+                            {category.name}
+                          </span>
+                          <span>·</span>
+                          <span className="shrink-0">{getPolicyDisplayDate(policy)}</span>
+                        </div>
+                        <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">
+                          {policy.title}
+                        </h3>
                       </div>
-                      <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">
-                        {policy.title}
-                      </h3>
+                      <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-[#E1306C]">
+                        <Instagram className="w-3.5 h-3.5 text-[#E1306C]" />
+                        <span className="hidden sm:inline">Feed</span>
+                      </span>
                     </div>
-                    <span className="shrink-0 inline-flex items-center gap-1 text-[11px] font-semibold text-[#E1306C]">
-                      <Instagram className="w-3.5 h-3.5 text-[#E1306C]" />
-                      <span className="hidden sm:inline">Feed</span>
-                    </span>
-                  </div>
 
-                  {/* Official Instagram Embed */}
-                  <div className="w-full flex justify-center py-1 sm:py-2 bg-slate-50/70 rounded-2xl border border-slate-100 overflow-hidden">
-                    <InstagramEmbed
-                      url={policy.instagramPostUrl}
-                      thumbnail={policy.thumbnail}
+                    {/* Visual Media: Direct Image URL or Official Instagram Embed */}
+                    <PolicyMediaFrame
+                      policy={policy}
                       clusterName={category.name}
-                      title={policy.title}
-                      hideHeader={true}
-                      captioned={false}
+                      variant="card"
+                      onOpenDetail={() => navigateTo({ name: 'policy-detail', slug: policy.slug })}
                     />
-                  </div>
 
-                  {/* Actions */}
-                  <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <a
-                      href={policy.instagramPostUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-slate-700 hover:text-[#07529A] font-semibold transition-colors whitespace-nowrap"
-                    >
-                      <Instagram className="w-3.5 h-3.5 text-[#E1306C] shrink-0" />
-                      <span>Buka di Instagram</span>
-                      <ExternalLink className="w-3 h-3 text-slate-400 shrink-0" />
-                    </a>
+                    {/* Actions */}
+                    <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      {media.externalSourceUrl ? (
+                        <a
+                          href={media.externalSourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-slate-700 hover:text-[#07529A] font-semibold transition-colors whitespace-nowrap"
+                        >
+                          <Instagram className="w-3.5 h-3.5 text-[#E1306C] shrink-0" />
+                          <span>
+                            {media.isInstagramSource ? 'Buka di Instagram' : 'Buka Sumber Konten'}
+                          </span>
+                          <ExternalLink className="w-3 h-3 text-slate-400 shrink-0" />
+                        </a>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 font-medium">
+                          Publikasi KOMPAK SDMA
+                        </span>
+                      )}
 
-                    <motion.button
-                      type="button"
-                      whileHover={{ y: -1 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => navigateTo({ name: 'policy-detail', slug: policy.slug })}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#07529A] hover:bg-[#053d73] text-white rounded-xl font-bold shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
-                    >
-                      <span>Buka Halaman Detail</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </motion.button>
+                      <motion.button
+                        type="button"
+                        whileHover={{ y: -1 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => navigateTo({ name: 'policy-detail', slug: policy.slug })}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#07529A] hover:bg-[#053d73] text-white rounded-xl font-bold shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
+                      >
+                        <span>Lihat Selengkapnya</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </motion.button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="bg-white rounded-2xl p-12 text-center border border-slate-200/90 max-w-md mx-auto space-y-3 shadow-2xs">
@@ -200,7 +214,7 @@ export const CategoryDetailPage: React.FC<CategoryDetailPageProps> = ({ slug }) 
                 Belum Ada Konten Diterbitkan
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
-                Konten Instagram untuk klaster ini sedang dalam tahap penyusunan oleh tim konten bersama verifikator regulasi.
+                Konten Instagram untuk {category.group === 'pilar' ? 'pilar konten' : 'klaster'} ini sedang dalam tahap penyusunan oleh tim konten bersama verifikator.
               </p>
             </div>
           )}

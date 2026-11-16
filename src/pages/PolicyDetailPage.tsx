@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { usePolicy } from '../context/PolicyContext';
-import { InstagramEmbed, resolvePolicyReleaseDate } from '../components/common/InstagramEmbed';
+import { PolicyMediaFrame } from '../components/policy/PolicyMediaFrame';
+import { resolvePolicyMedia } from '../utils/imageUrlUtils';
+import { getPolicyDisplayDate } from '../utils/dateUtils';
+import { getPolicyAboutDescription } from '../utils/policySummaryUtils';
 import { CategoryIcon } from '../components/common/CategoryIcon';
 import {
   ArrowLeft,
@@ -154,7 +157,7 @@ export const PolicyDetailPage: React.FC<PolicyDetailPageProps> = ({ slug }) => {
             <span aria-hidden="true">·</span>
             <span className="flex items-center gap-1">
               <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <span>Dipublikasikan {resolvePolicyReleaseDate(policy)}</span>
+              <span>Dipublikasikan {getPolicyDisplayDate(policy)}</span>
             </span>
             <span aria-hidden="true">·</span>
             <span className="text-slate-600 font-medium inline-flex items-center gap-1">
@@ -182,85 +185,104 @@ export const PolicyDetailPage: React.FC<PolicyDetailPageProps> = ({ slug }) => {
           {/* Left Column (col-span-7) -> Instagram Embed & Media */}
           <div className="lg:col-span-7 space-y-4 min-w-0">
             <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-4 sm:p-6 shadow-2xs space-y-4 overflow-hidden">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3.5">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-8 h-8 rounded-xl bg-rose-50 text-[#E1306C] border border-rose-100 flex items-center justify-center font-bold shrink-0">
-                    <Instagram className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
-                      Feed Instagram Resmi
-                    </h2>
-                    <p className="text-[11px] text-slate-500">
-                      Infografis interaktif & karusel multi-slide
-                    </p>
-                  </div>
-                </div>
+              {(() => {
+                const media = resolvePolicyMedia(policy);
+                return (
+                  <>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-rose-50 text-[#E1306C] border border-rose-100 flex items-center justify-center font-bold shrink-0">
+                          <Instagram className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h2 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                            {media.hasEmbeddableInstagramPost
+                              ? 'Feed Instagram Resmi'
+                              : 'Visual & Sampul Publikasi'}
+                          </h2>
+                          <p className="text-[11px] text-slate-500">
+                            {media.hasEmbeddableInstagramPost
+                              ? 'Infografis interaktif & karusel multi-slide'
+                              : 'Visual edukasi kebijakan SDM Aparatur'}
+                          </p>
+                        </div>
+                      </div>
 
-                <span className="text-[11px] font-semibold text-[#E1306C] flex items-center gap-1">
-                  <Instagram className="w-3 h-3 text-[#E1306C] shrink-0" />
-                  <span>Kepsyen Lengkap Aktif</span>
-                </span>
-              </div>
+                      <span className="text-[11px] font-semibold text-[#E1306C] flex items-center gap-1">
+                        <Instagram className="w-3 h-3 text-[#E1306C] shrink-0" />
+                        <span>
+                          {media.hasEmbeddableInstagramPost
+                            ? 'Kepsyen Lengkap Aktif'
+                            : '@sdmapanrb'}
+                        </span>
+                      </span>
+                    </div>
 
-              {/* Instagram Embed Component with Carousel and Full Caption */}
-              <div className="w-full flex justify-center py-1 overflow-hidden">
-                <InstagramEmbed
-                  url={policy.instagramPostUrl}
-                  thumbnail={policy.thumbnail}
-                  clusterName={category?.name}
-                  title={policy.title}
-                  captioned={true}
-                  hideHeader={true}
-                  className="w-full max-w-full"
-                />
-              </div>
+                    {/* Visual Media: Admin Image URL and/or Official Instagram Embed */}
+                    <PolicyMediaFrame
+                      policy={policy}
+                      clusterName={category?.name}
+                      variant="detail"
+                    />
 
-              <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                <span className="text-slate-500 text-[11px]">
-                  Navigasi geser slide aktif di dalam frame Instagram
-                </span>
-                <a
-                  href={policy.instagramPostUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 text-[11px] font-bold text-[#07529A] hover:underline whitespace-nowrap"
-                >
-                  <span>Buka di Aplikasi Instagram</span>
-                  <ExternalLink className="w-3 h-3" />
-                </a>
-              </div>
+                    <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span className="text-slate-500 text-[11px]">
+                        {media.hasEmbeddableInstagramPost
+                          ? 'Navigasi geser slide aktif di dalam frame Instagram'
+                          : 'Publikasi resmi Deputi Bidang SDM Aparatur'}
+                      </span>
+                      {media.externalSourceUrl && (
+                        <a
+                          href={media.externalSourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-[#07529A] hover:underline whitespace-nowrap"
+                        >
+                          <span>
+                            {media.isInstagramSource
+                              ? 'Buka di Aplikasi Instagram'
+                              : 'Buka Sumber Konten'}
+                          </span>
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
 
           {/* Right Panel (col-span-5) -> Supporting Information (sticky offset clears sticky Header) */}
           <div className="lg:col-span-5 space-y-6 lg:sticky lg:top-24 min-w-0">
             {/* 1. Tentang Konten */}
-            <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-6 shadow-2xs space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2 text-xs font-bold text-[#07529A] uppercase tracking-wider">
-                  <BookOpen className="w-4 h-4 text-[#07529A] shrink-0" />
-                  <span>Tentang Konten</span>
-                </div>
-                {policy.isAiSummaryApproved && policy.aiSummary?.trim() && (
-                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#07529A]">
-                    <Sparkles className="w-3 h-3 text-[#07529A] shrink-0" />
-                    <span>Ringkasan AI Terverifikasi</span>
-                  </span>
-                )}
-              </div>
+            {(() => {
+              const aboutDesc = getPolicyAboutDescription(policy);
+              return (
+                <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-6 shadow-2xs space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                    <div className="flex items-center gap-2 text-xs font-bold text-[#07529A] uppercase tracking-wider">
+                      <BookOpen className="w-4 h-4 text-[#07529A] shrink-0" />
+                      <span>Tentang Konten</span>
+                    </div>
+                    {aboutDesc.isAiSummary && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-[#07529A]">
+                        <Sparkles className="w-3 h-3 text-[#07529A] shrink-0" />
+                        <span>Ringkasan AI Terverifikasi</span>
+                      </span>
+                    )}
+                  </div>
 
-              <div className="space-y-4">
-                <p className="text-sm sm:text-[15px] text-slate-700 leading-relaxed font-normal">
-                  {policy.isAiSummaryApproved && policy.aiSummary?.trim()
-                    ? policy.aiSummary
-                    : policy.summary ||
-                      'Materi edukasi kebijakan SDM Aparatur yang bersumber dari media sosial resmi KemenPANRB.'}
-                </p>
+                  <div className="space-y-4">
+                    <p className="text-sm sm:text-[15px] text-slate-700 leading-relaxed font-normal whitespace-pre-line">
+                      {aboutDesc.text}
+                    </p>
 
                 <div className="p-4 rounded-2xl bg-slate-50/90 border border-slate-200/80 space-y-2.5 text-xs">
                   <div className="flex items-start justify-between gap-3">
-                    <span className="text-slate-500 font-medium shrink-0">Klaster ASN:</span>
+                    <span className="text-slate-500 font-medium shrink-0">
+                      {category?.group === 'pilar' ? 'Pilar Konten:' : 'Klaster ASN:'}
+                    </span>
                     {category ? (
                       <button
                         type="button"
@@ -275,11 +297,15 @@ export const PolicyDetailPage: React.FC<PolicyDetailPageProps> = ({ slug }) => {
                   </div>
                   <div className="flex items-center justify-between gap-3 pt-2 border-t border-slate-200/70">
                     <span className="text-slate-500 font-medium">Tanggal Rilis:</span>
-                    <span className="font-semibold text-slate-700">{resolvePolicyReleaseDate(policy)}</span>
+                    <span className="font-semibold text-slate-700">
+                      {getPolicyDisplayDate(policy)}
+                    </span>
                   </div>
                 </div>
-              </div>
-            </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* 2. Regulasi Terkait */}
             <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-6 shadow-2xs space-y-4">

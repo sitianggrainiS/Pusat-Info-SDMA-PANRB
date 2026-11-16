@@ -19,28 +19,30 @@ interface AdminLoginPageProps {
 }
 
 export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
-  const { loginAsAdmin, loginWithGoogleFirebase, navigateTo } = usePolicy();
+  const { loginAsAdmin, loginWithGoogle, navigateTo } = usePolicy();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [passwordError, setPasswordError] = useState<string | null>(null);
-  const [googleAuthError, setGoogleAuthError] = useState<string | null>(null);
-  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [isEmailLoading, setIsEmailLoading] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [googleError, setGoogleError] = useState<string | null>(null);
 
   const handleGoogleSignIn = async () => {
-    setEmailError(null);
-    setPasswordError(null);
-    setGoogleAuthError(null);
     setIsGoogleLoading(true);
+    setGoogleError(null);
+    setAuthError(null);
     try {
-      const res = await loginWithGoogleFirebase();
+      const res = await loginWithGoogle();
       if (!res.success) {
-        setGoogleAuthError(res.error || 'Autentikasi Google gagal.');
+        setGoogleError(res.error || 'Autentikasi Google gagal.');
         return;
       }
       navigateTo({ name: 'admin-dashboard' });
+    } catch (err: any) {
+      setGoogleError(err?.message || 'Gagal masuk dengan Google.');
     } finally {
       setIsGoogleLoading(false);
     }
@@ -50,7 +52,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
     e.preventDefault();
     setEmailError(null);
     setPasswordError(null);
-    setGoogleAuthError(null);
+    setAuthError(null);
 
     if (!email.trim()) {
       setEmailError('Email wajib diisi.');
@@ -67,9 +69,11 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
       const result = await loginAsAdmin(email.trim(), password);
       if (!result.success) {
         if (result.errorType === 'email') {
-          setEmailError(result.error || 'Email tidak terotorisasi.');
+          setEmailError(result.error || 'Email tidak valid.');
+        } else if (result.errorType === 'password') {
+          setPasswordError(result.error || 'Password salah.');
         } else {
-          setPasswordError(result.error || 'Autentikasi gagal.');
+          setAuthError(result.error || 'Akses administrator ditolak.');
         }
         return;
       }
@@ -118,7 +122,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
             Portal Tim Konten SDM Aparatur
           </h2>
           <p className="text-xs sm:text-[13px] text-slate-500 leading-relaxed">
-            Akses Terbatas: Hanya akun resmi yang terotorisasi yang dapat masuk dan mengelola database Cloud Firestore.
+            Akses Terbatas: Hanya akun kedinasan resmi yang terotorisasi yang dapat masuk dan mengelola konten KOMPAK SDMA.
           </p>
         </div>
 
@@ -130,56 +134,13 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
           </div>
         )}
 
-        {/* Primary Firebase Google Authentication */}
-        <div className="space-y-2.5">
-          <motion.button
-            whileHover={{ y: -1 }}
-            whileTap={{ scale: 0.985 }}
-            type="button"
-            disabled={isGoogleLoading}
-            onClick={handleGoogleSignIn}
-            className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-slate-800 text-xs sm:text-sm font-bold rounded-xl border border-slate-200 shadow-xs transition-all cursor-pointer flex items-center justify-center gap-2.5 disabled:opacity-60"
-          >
-            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
-              <path
-                fill="#4285F4"
-                d="M23.49 12.27c0-.79-.07-1.54-.19-2.27H12v4.51h6.47c-.29 1.48-1.14 2.73-2.4 3.58v3h3.86c2.26-2.09 3.56-5.17 3.56-8.82z"
-              />
-              <path
-                fill="#34A853"
-                d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.86-3c-1.08.72-2.45 1.16-4.07 1.16-3.13 0-5.78-2.11-6.73-4.96H1.29v3.09C3.26 21.3 7.31 24 12 24z"
-              />
-              <path
-                fill="#FBBC05"
-                d="M5.27 14.29c-.25-.72-.38-1.49-.38-2.29s.13-1.57.38-2.29V6.62H1.29C.47 8.24 0 10.06 0 12s.47 3.76 1.29 5.38l3.98-3.09z"
-              />
-              <path
-                fill="#EA4335"
-                d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.7 1.29 6.62l3.98 3.09c.95-2.85 3.6-4.96 6.73-4.96z"
-              />
-            </svg>
-            <span>
-              {isGoogleLoading
-                ? 'Menghubungkan ke Firebase Auth...'
-                : 'Masuk dengan Google (Firebase Auth)'}
-            </span>
-          </motion.button>
-
-          {googleAuthError && (
-            <p className="text-xs font-semibold text-red-600 flex items-start gap-1.5">
-              <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
-              <span>{googleAuthError}</span>
-            </p>
-          )}
-
-          <div className="relative flex items-center py-1">
-            <div className="flex-grow border-t border-slate-200/80" />
-            <span className="shrink-0 mx-3 text-[11px] font-medium text-slate-400">
-              atau akun kedinasan
-            </span>
-            <div className="flex-grow border-t border-slate-200/80" />
+        {/* Authorization / Firebase Auth Error Banner */}
+        {authError && (
+          <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-xs text-red-700 font-medium flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+            <p className="leading-relaxed">{authError}</p>
           </div>
-        </div>
+        )}
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-4" autoComplete="off">
@@ -269,19 +230,69 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({ notice }) => {
             whileHover={{ y: -1 }}
             whileTap={{ scale: 0.985 }}
             type="submit"
-            disabled={isEmailLoading || isGoogleLoading}
+            disabled={isEmailLoading}
             className="w-full py-3 px-4 bg-[#07529A] hover:bg-[#053d73] text-white text-xs sm:text-sm font-bold rounded-xl shadow-[0_8px_20px_-6px_rgba(7,82,154,0.45)] transition-colors cursor-pointer flex items-center justify-center gap-2 mt-2 disabled:opacity-60"
           >
             <KeyRound className="w-4 h-4 text-[#FFD84D]" />
-            <span>{isEmailLoading ? 'Memverifikasi di Firebase Auth...' : 'Masuk ke Portal Admin'}</span>
+            <span>{isEmailLoading ? 'Memverifikasi Akses...' : 'Masuk ke Portal Admin'}</span>
             <ArrowRight className="w-4 h-4" />
           </motion.button>
         </form>
 
+        {/* Firebase Authentication Divider & Button */}
+        <div className="space-y-3 pt-1">
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-200/80" />
+            </div>
+            <div className="relative flex justify-center text-xs">
+              <span className="bg-white px-3 text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                atau masuk dengan
+              </span>
+            </div>
+          </div>
+
+          {googleError && (
+            <p className="text-xs font-semibold text-red-600 flex items-center justify-center gap-1.5 p-2 bg-red-50 rounded-xl border border-red-200">
+              <AlertCircle className="w-3.5 h-3.5 text-red-600 shrink-0" />
+              <span>{googleError}</span>
+            </p>
+          )}
+
+          <motion.button
+            whileHover={{ y: -1 }}
+            whileTap={{ scale: 0.985 }}
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={isGoogleLoading}
+            className="w-full py-2.5 px-4 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-bold rounded-xl border border-slate-200/90 shadow-2xs transition-colors cursor-pointer flex items-center justify-center gap-2.5 disabled:opacity-60"
+          >
+            <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
+              <path
+                fill="#4285F4"
+                d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+              />
+              <path
+                fill="#34A853"
+                d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+              />
+              <path
+                fill="#FBBC05"
+                d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+              />
+              <path
+                fill="#EA4335"
+                d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
+              />
+            </svg>
+            <span>{isGoogleLoading ? 'Menghubungkan...' : 'Akun Google (Firebase Auth)'}</span>
+          </motion.button>
+        </div>
+
         {/* Security Footer Note */}
         <div className="pt-4 border-t border-slate-100 text-center">
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            Sistem Keamanan Kedinasan (RBAC & Firebase Security Rules) aktif. Akses terbatas hanya untuk personil resmi Kementerian PANRB.
+            Sistem Keamanan Kedinasan (RBAC) aktif. Akses terbatas hanya untuk personil resmi Kementerian PANRB.
           </p>
         </div>
       </motion.div>

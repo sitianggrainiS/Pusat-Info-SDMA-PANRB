@@ -269,14 +269,14 @@ export const ImageUploadGallery: React.FC<ImageUploadGalleryProps> = ({
       {showUrlField && (
         <div className="pt-2">
           <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-            Atau masukkan link / URL gambar langsung:
+            Atau masukkan path aset proyek (/images/...) maupun URL gambar eksternal:
           </label>
           <div className="flex items-center gap-2">
             <input
               type="text"
-              value={value}
+              value={value?.startsWith('data:image/') ? '' : value}
               onChange={(e) => onChange(e.target.value)}
-              placeholder="https://... atau /src/assets/images/..."
+              placeholder="/images/nama-gambar.jpg atau https://..."
               className="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-300 focus:border-[#07529A] focus:outline-none"
             />
             {value && (
@@ -290,6 +290,12 @@ export const ImageUploadGallery: React.FC<ImageUploadGalleryProps> = ({
             )}
           </div>
         </div>
+      )}
+
+      {isBase64 && (
+        <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 leading-relaxed">
+          Catatan: Foto unggahan langsung dari perangkat hanya tersimpan sementara di browser saat ini. Untuk gambar permanen lintas perangkat setelah publish ulang, simpan file di folder <code className="font-mono">public/images/</code> lalu gunakan path <code className="font-mono">/images/nama-gambar.jpg</code>.
+        </p>
       )}
 
       {errorMessage && (

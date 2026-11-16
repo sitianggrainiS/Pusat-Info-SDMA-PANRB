@@ -1,11 +1,13 @@
 import React, { useState, useRef, useMemo } from 'react';
 import { usePolicy } from '../../context/PolicyContext';
 import { DeputyNews, DeputyNewsInput, DeputyNewsStatus } from '../../types';
-import { compressImageFile } from '../../utils/thumbnailUtils';
+import { StaticAssetPicker } from './StaticAssetPicker';
 import {
   DEFAULT_DEPUTY_NEWS_CATEGORIES,
   validateMenpanArticleUrl,
   validateNewsThumbnail,
+  validateUploadedNewsImageFile,
+  resolveDeputyNewsImageUrl,
   formatIndonesianNewsDate,
   sortDeputyNewsNewestFirst,
 } from '../../utils/deputyNewsUtils';
@@ -91,9 +93,9 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
 }) => {
   const {
     deputyNews,
+    deputyNewsImageUrls,
     categories,
     isDeputyNewsLoading,
-    isStorageEnabled,
     createDeputyNews,
     updateDeputyNews,
     setDeputyNewsStatus,
@@ -108,13 +110,13 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
   const [editingNews, setEditingNews] = useState<DeputyNews | null>(null);
   const isFormOpen = externalCreateModalOpen || editingNews !== null;
 
-  // Form Field States (strictly manual, never auto-fetched)
+  // Form Field States (strictly manual, stored locally via localStorage + IndexedDB Blob)
   const [articleUrl, setArticleUrl] = useState('');
   const [title, setTitle] = useState('');
-  const [thumbnailMode, setThumbnailMode] = useState<'upload' | 'url'>(
-    isStorageEnabled ? 'upload' : 'url'
-  );
-  const [thumbnailData, setThumbnailData] = useState('');
+  const [thumbnailMode, setThumbnailMode] = useState<'upload' | 'url'>('upload');
+  const [selectedImageFile, setSelectedImageFile] = useState<File | null>(null);
+  const [localFilePreviewUrl, setLocalFilePreviewUrl] = useState('');
+  const [existingImageId, setExistingImageId] = useState('');
   const [thumbnailUrlInput, setThumbnailUrlInput] = useState('');
   const [publicationDate, setPublicationDate] = useState('');
   const [summary, setSummary] = useState('');
@@ -123,6 +125,7 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
   const [fieldErrors, setFieldErrors] = useState<FormFieldErrors>({});
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [previewImgBroken, setPreviewImgBroken] = useState(false);
+  const [clearedExistingUpload, setClearedExistingUpload] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
 
@@ -131,6 +134,24 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const savingLockRef = useRef<boolean>(false);
+
+  // Manage temporary in-modal object URL lifecycle for newly selected file preview
+  React.useEffect(() => {
+    if (!selectedImageFile) {
+      setLocalFilePreviewUrl('');
+      return;
+    }
+    const previewObjUrl = URL.createObjectURL(selectedImageFile);
+    setLocalFilePreviewUrl(previewObjUrl);
+    return () => {
+      try {
+        URL.revokeObjectURL(previewObjUrl);
+      } catch {
+        // ignore
+      }
+    };
+  }, [selectedImageFile]);
 
   // Merge official SDMA news categories with dynamic 8 Klaster categories
   const categoryOptions = useMemo(() => {
@@ -144,72 +165,83 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
   // Reset form when opening Create Modal
   React.useEffect(() => {
     if (externalCreateModalOpen && !editingNews) {
+      const now = new Date();
+      const localTodayIso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       setArticleUrl('');
       setTitle('');
-      setThumbnailMode(isStorageEnabled ? 'upload' : 'url');
-      setThumbnailData('');
+      setThumbnailMode('upload');
+      setSelectedImageFile(null);
+      setExistingImageId('');
       setThumbnailUrlInput('');
-      setPublicationDate('');
+      setPublicationDate(localTodayIso);
       setSummary('');
-      setCategory('');
+      setCategory(DEFAULT_DEPUTY_NEWS_CATEGORIES[0] || '');
       setFieldErrors({});
       setPreviewImgBroken(false);
+      setClearedExistingUpload(false);
     }
-  }, [externalCreateModalOpen, editingNews, isStorageEnabled]);
+  }, [externalCreateModalOpen, editingNews]);
 
   const openEditModal = (item: DeputyNews) => {
-    const isDataUri = item.thumbnailUrl.startsWith('data:image/');
+    const hasStoredUpload = Boolean(
+      item.imageId || (item.thumbnailUrl && item.thumbnailUrl.startsWith('data:image/'))
+    );
     setEditingNews(item);
     setArticleUrl(item.articleUrl);
     setTitle(item.title);
-    setThumbnailMode(isDataUri ? 'upload' : 'url');
-    setThumbnailData(isDataUri ? item.thumbnailUrl : '');
-    setThumbnailUrlInput(isDataUri ? '' : item.thumbnailUrl);
+    setThumbnailMode(hasStoredUpload ? 'upload' : 'url');
+    setSelectedImageFile(null);
+    setExistingImageId(item.imageId || '');
+    setThumbnailUrlInput(hasStoredUpload ? '' : item.thumbnailUrl);
     setPublicationDate(item.publicationDate);
     setSummary(item.summary);
-    setCategory(item.category);
+    setCategory(item.category || DEFAULT_DEPUTY_NEWS_CATEGORIES[0] || '');
     setFieldErrors({});
     setPreviewImgBroken(false);
+    setClearedExistingUpload(false);
   };
 
   const closeFormModal = () => {
-    if (isSubmitting) return;
+    if (isSubmitting || savingLockRef.current) return;
     setEditingNews(null);
+    setSelectedImageFile(null);
+    setExistingImageId('');
+    setClearedExistingUpload(false);
     onCloseExternalCreateModal();
     setFieldErrors({});
   };
 
-  const effectiveThumbnailPreview =
-    thumbnailMode === 'upload' ? thumbnailData : thumbnailUrlInput.trim();
+  const hasFallbackDataUrl = Boolean(
+    !clearedExistingUpload && editingNews?.thumbnailUrl?.startsWith('data:image/')
+  );
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const effectiveThumbnailPreview =
+    thumbnailMode === 'upload'
+      ? localFilePreviewUrl ||
+        (existingImageId ? deputyNewsImageUrls[existingImageId] || '' : '') ||
+        (hasFallbackDataUrl ? editingNews?.thumbnailUrl || '' : '')
+      : thumbnailUrlInput.trim();
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      setFieldErrors((prev) => ({
-        ...prev,
-        thumbnailUrl: 'Format file tidak didukung. Pilih gambar berformat JPG, PNG, atau WEBP.',
-      }));
-      return;
-    }
-
+    setIsUploadingImage(true);
     try {
-      setIsUploadingImage(true);
+      const fileCheck = validateUploadedNewsImageFile(file);
+      if (!fileCheck.isValid) {
+        setFieldErrors((prev) => ({
+          ...prev,
+          thumbnailUrl: fileCheck.error,
+        }));
+        return;
+      }
+
       setFieldErrors((prev) => ({ ...prev, thumbnailUrl: undefined }));
-      const uploadedUrl = await compressImageFile(file, 1200, 0.85, 'deputy-news');
-      setThumbnailData(uploadedUrl);
+      setSelectedImageFile(file);
       setThumbnailMode('upload');
       setPreviewImgBroken(false);
-    } catch (err) {
-      console.error('Image upload error:', err);
-      setFieldErrors((prev) => ({
-        ...prev,
-        thumbnailUrl:
-          err instanceof Error
-            ? err.message
-            : 'Gagal memproses file gambar. Silakan gunakan URL gambar eksternal (https://...).',
-      }));
+      setClearedExistingUpload(false);
     } finally {
       setIsUploadingImage(false);
       if (fileInputRef.current) {
@@ -218,7 +250,10 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
     }
   };
 
-  const validateAllInputs = (): { valid: boolean; sanitized?: Omit<DeputyNewsInput, 'status'> } => {
+  const validateAllInputs = (): {
+    valid: boolean;
+    sanitized?: Omit<DeputyNewsInput, 'status'>;
+  } => {
     const errors: FormFieldErrors = {};
 
     // 1. Validate Article Link (HTTPS + menpan.go.id / official subdomain)
@@ -235,11 +270,33 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
       errors.title = 'Judul berita minimal terdiri dari 5 karakter.';
     }
 
-    // 3. Validate Thumbnail
-    const rawThumb = thumbnailMode === 'upload' ? thumbnailData : thumbnailUrlInput;
-    const thumbCheck = validateNewsThumbnail(rawThumb);
-    if (!thumbCheck.isValid) {
-      errors.thumbnailUrl = thumbCheck.error;
+    // 3. Validate Thumbnail (Firestore upload OR valid static/external URL)
+    let cleanThumbnailUrl = '';
+    if (thumbnailMode === 'upload') {
+      if (selectedImageFile) {
+        const fileCheck = validateUploadedNewsImageFile(selectedImageFile);
+        if (!fileCheck.isValid) {
+          errors.thumbnailUrl = fileCheck.error;
+        } else if (previewImgBroken) {
+          errors.thumbnailUrl =
+            'File gambar gagal dimuat pada pratinjau. Silakan pilih file gambar yang valid.';
+        }
+      } else if (!existingImageId && !hasFallbackDataUrl) {
+        errors.thumbnailUrl = 'Silakan pilih dan unggah file gambar berita terlebih dahulu.';
+      } else if (previewImgBroken) {
+        errors.thumbnailUrl =
+          'Gambar berita gagal dimuat. Silakan pilih ulang file gambar berita.';
+      }
+    } else {
+      const thumbCheck = validateNewsThumbnail(thumbnailUrlInput);
+      if (!thumbCheck.isValid) {
+        errors.thumbnailUrl = thumbCheck.error;
+      } else if (previewImgBroken) {
+        errors.thumbnailUrl =
+          'URL gambar gagal dimuat. Pastikan URL mengarah langsung ke file gambar (.jpg, .png, .webp) yang valid dan dapat diakses publik.';
+      } else {
+        cleanThumbnailUrl = thumbCheck.cleanThumbnail;
+      }
     }
 
     // 4. Validate Publication Date
@@ -275,7 +332,17 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
       sanitized: {
         articleUrl: urlCheck.cleanUrl,
         title: cleanTitle,
-        thumbnailUrl: thumbCheck.cleanThumbnail,
+        imageFile: thumbnailMode === 'upload' ? selectedImageFile : null,
+        imageId:
+          thumbnailMode === 'upload' && !selectedImageFile && existingImageId
+            ? existingImageId
+            : undefined,
+        thumbnailUrl:
+          thumbnailMode === 'url'
+            ? cleanThumbnailUrl
+            : !selectedImageFile && hasFallbackDataUrl
+            ? editingNews?.thumbnailUrl || ''
+            : '',
         publicationDate: cleanDate,
         summary: cleanSummary,
         category: cleanCategory,
@@ -284,10 +351,13 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
   };
 
   const handleSaveWithStatus = async (targetStatus: DeputyNewsStatus) => {
+    if (savingLockRef.current || isSubmitting) return;
+
     const validation = validateAllInputs();
     if (!validation.valid || !validation.sanitized) return;
 
     try {
+      savingLockRef.current = true;
       setIsSubmitting(true);
       setFieldErrors((prev) => ({ ...prev, general: undefined }));
 
@@ -300,26 +370,30 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
         await updateDeputyNews(editingNews.id, payload);
         onShowToast(
           targetStatus === 'published'
-            ? 'Perubahan berita berhasil disimpan dan diterbitkan ke beranda publik.'
+            ? 'Perubahan berita dan gambar berhasil disimpan serta diterbitkan ke beranda publik.'
             : 'Perubahan berita berhasil disimpan sebagai Draft.'
         );
       } else {
         await createDeputyNews(payload);
         onShowToast(
           targetStatus === 'published'
-            ? 'Berita Deputi berhasil diunggah dan langsung tampil di beranda publik.'
+            ? 'Berita Deputi dan gambar berhasil disimpan serta ditampilkan di beranda publik.'
             : 'Berita Deputi berhasil disimpan sebagai Draft.'
         );
       }
 
       setEditingNews(null);
+      setSelectedImageFile(null);
+      setExistingImageId('');
+      setClearedExistingUpload(false);
       onCloseExternalCreateModal();
     } catch (err: any) {
       setFieldErrors((prev) => ({
         ...prev,
-        general: err?.message || 'Terjadi kesalahan saat menyimpan data berita.',
+        general: err?.message || 'Terjadi kesalahan saat menyimpan data berita ke Cloud Firestore.',
       }));
     } finally {
+      savingLockRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -475,7 +549,10 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
                     <tr key={item.id} className="hover:bg-slate-50/80 transition-colors">
                       {/* Thumbnail */}
                       <td className="py-3.5 px-4">
-                        <NewsThumbnailThumb src={item.thumbnailUrl} alt={item.title} />
+                        <NewsThumbnailThumb
+                          src={resolveDeputyNewsImageUrl(item, deputyNewsImageUrls)}
+                          alt={item.title}
+                        />
                       </td>
 
                       {/* Judul Berita & Ringkasan singkat */}
@@ -793,11 +870,23 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
                       }`}
                     />
                   </div>
-                  {fieldErrors.publicationDate && (
+                  {fieldErrors.publicationDate ? (
                     <p className="text-xs font-semibold text-rose-600 mt-1 flex items-center gap-1.5">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                       <span>{fieldErrors.publicationDate}</span>
                     </p>
+                  ) : (
+                    publicationDate.trim() && (
+                      <p className="text-[11px] font-medium text-emerald-700 mt-1 flex items-center gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>
+                          Ditampilkan pada tabel & beranda:{' '}
+                          <strong className="font-bold">
+                            {formatIndonesianNewsDate(publicationDate)}
+                          </strong>
+                        </span>
+                      </p>
+                    )
                   )}
                 </div>
               </div>
@@ -822,7 +911,7 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      Unggah File Perangkat
+                      Upload Gambar
                     </button>
                     <button
                       type="button"
@@ -836,71 +925,87 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
-                      Masukkan URL Gambar
+                      Aset Proyek / URL Gambar
                     </button>
                   </div>
                 </div>
 
-                {thumbnailMode === 'upload' ? (
-                  <div
-                    className={`p-4 rounded-2xl border border-dashed flex flex-col sm:flex-row items-center justify-between gap-3 ${
-                      fieldErrors.thumbnailUrl
-                        ? 'border-rose-400 bg-rose-50/20'
-                        : 'border-slate-300 bg-slate-50/70'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#07529A] flex items-center justify-center shrink-0">
-                        <Upload className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <p className="text-xs font-bold text-slate-800">
-                          {!isStorageEnabled
-                            ? 'Firebase Storage Nonaktif (Spark Plan)'
-                            : thumbnailData
-                            ? 'File gambar berhasil diunggah'
-                            : 'Pilih gambar dari komputer / perangkat'}
-                        </p>
-                        <p className="text-[11px] text-slate-500">
-                          {!isStorageEnabled
-                            ? 'Pilih tab "Masukkan URL Gambar" (https://...) untuk menyimpan metadata gambar permanen di Firestore.'
-                            : 'Mendukung format JPG, PNG, atau WEBP.'}
-                        </p>
-                      </div>
+                {thumbnailMode === 'url' ? (
+                  <div className="space-y-3">
+                    <StaticAssetPicker
+                      selectedUrl={thumbnailUrlInput}
+                      compact
+                      onSelect={(assetPath) => {
+                        setThumbnailUrlInput(assetPath);
+                        setPreviewImgBroken(false);
+                        setFieldErrors((prev) => ({ ...prev, thumbnailUrl: undefined }));
+                      }}
+                    />
+
+                    <div>
+                      <input
+                        type="text"
+                        value={thumbnailUrlInput}
+                        onChange={(e) => {
+                          setThumbnailUrlInput(e.target.value);
+                          setPreviewImgBroken(false);
+                          if (fieldErrors.thumbnailUrl) {
+                            setFieldErrors((prev) => ({ ...prev, thumbnailUrl: undefined }));
+                          }
+                        }}
+                        placeholder="/images/nama-gambar.jpg atau https://www.menpan.go.id/images/..."
+                        className={`w-full text-xs px-3.5 py-2.5 rounded-xl border focus:outline-none transition-colors ${
+                          fieldErrors.thumbnailUrl
+                            ? 'border-rose-500 bg-rose-50/30 focus:border-rose-600'
+                            : 'border-slate-300 focus:border-[#07529A] bg-white'
+                        }`}
+                      />
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isUploadingImage}
-                      className="px-3.5 py-2 bg-[#07529A] hover:bg-[#053d73] text-white text-xs font-bold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 inline-flex items-center gap-1.5"
-                    >
-                      {isUploadingImage ? (
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      ) : (
-                        <ImageIcon className="w-3.5 h-3.5" />
-                      )}
-                      <span>{thumbnailData ? 'Ganti File Gambar' : 'Pilih File Gambar'}</span>
-                    </button>
                   </div>
                 ) : (
-                  <div>
-                    <input
-                      type="url"
-                      value={thumbnailUrlInput}
-                      onChange={(e) => {
-                        setThumbnailUrlInput(e.target.value);
-                        setPreviewImgBroken(false);
-                        if (fieldErrors.thumbnailUrl) {
-                          setFieldErrors((prev) => ({ ...prev, thumbnailUrl: undefined }));
-                        }
-                      }}
-                      placeholder="https://www.menpan.go.id/images/berita/contoh-gambar.jpg"
-                      className={`w-full text-xs px-3.5 py-2.5 rounded-xl border focus:outline-none transition-colors ${
+                  <div className="space-y-2.5">
+                    <div
+                      className={`p-4 rounded-2xl border border-dashed flex flex-col sm:flex-row items-center justify-between gap-3 ${
                         fieldErrors.thumbnailUrl
-                          ? 'border-rose-500 bg-rose-50/30 focus:border-rose-600'
-                          : 'border-slate-300 focus:border-[#07529A] bg-white'
+                          ? 'border-rose-400 bg-rose-50/20'
+                          : 'border-slate-300 bg-slate-50/70'
                       }`}
-                    />
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#07529A] flex items-center justify-center shrink-0">
+                          <Upload className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">
+                            {selectedImageFile
+                              ? selectedImageFile.name
+                              : existingImageId || hasFallbackDataUrl
+                              ? 'Gambar tersimpan di Cloud Firestore'
+                              : 'Pilih file gambar berita dari perangkat'}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            Format JPG, PNG, atau WEBP (maks. 15 MB). Dikompresi otomatis dan disimpan permanen di Cloud Firestore.
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploadingImage}
+                        className="px-3.5 py-2 bg-[#07529A] hover:bg-[#053d73] text-white text-xs font-bold rounded-xl transition-colors cursor-pointer whitespace-nowrap shrink-0 inline-flex items-center gap-1.5"
+                      >
+                        {isUploadingImage ? (
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <ImageIcon className="w-3.5 h-3.5" />
+                        )}
+                        <span>
+                          {selectedImageFile || existingImageId || hasFallbackDataUrl
+                            ? 'Ganti Gambar'
+                            : 'Pilih Gambar'}
+                        </span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -924,12 +1029,12 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
                       <div className="min-w-0">
                         <p className="text-xs font-bold text-slate-800">Pratinjau Thumbnail</p>
                         {previewImgBroken ? (
-                          <p className="text-[11px] text-amber-700 mt-0.5">
-                            Gambar dari URL tidak dapat dimuat. Pastikan tautan mengarah langsung ke file gambar atau gunakan unggah file.
+                          <p className="text-[11px] text-rose-700 font-semibold mt-0.5">
+                            Gambar tidak valid atau gagal dimuat. Periksa kembali file atau tautan gambar sebelum menyimpan.
                           </p>
                         ) : (
-                          <p className="text-[11px] text-slate-500 truncate mt-0.5">
-                            Gambar siap ditampilkan pada kartu berita beranda.
+                          <p className="text-[11px] text-emerald-700 font-medium truncate mt-0.5">
+                            ✓ Gambar berhasil dimuat & siap ditampilkan pada kartu berita publik.
                           </p>
                         )}
                       </div>
@@ -937,8 +1042,13 @@ export const DeputyNewsManager: React.FC<DeputyNewsManagerProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        if (thumbnailMode === 'upload') setThumbnailData('');
-                        else setThumbnailUrlInput('');
+                        if (thumbnailMode === 'upload') {
+                          setSelectedImageFile(null);
+                          setExistingImageId('');
+                          setClearedExistingUpload(true);
+                        } else {
+                          setThumbnailUrlInput('');
+                        }
                         setPreviewImgBroken(false);
                       }}
                       className="text-xs font-semibold text-rose-600 hover:text-rose-700 px-2.5 py-1.5 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer shrink-0"

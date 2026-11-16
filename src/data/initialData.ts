@@ -11,6 +11,27 @@ export const STANDARD_KLASTER_IDS = new Set([
   'cat-sistem-merit',
 ]);
 
+export const STANDARD_PILAR_IDS = [
+  'cat-sekolah-kedinasan',
+  'cat-fun-content',
+  'cat-greetings',
+  'cat-quiz',
+  'cat-collab',
+] as const;
+
+export function isRemovedSubstansiCategory(cat?: {
+  id?: string;
+  slug?: string;
+  name?: string;
+} | null): boolean {
+  if (!cat) return false;
+  return (
+    cat.id === 'cat-substansi' ||
+    cat.slug?.toLowerCase() === 'substansi' ||
+    cat.name?.trim().toLowerCase() === 'substansi'
+  );
+}
+
 export const INITIAL_CATEGORIES: Category[] = [
   {
     id: 'cat-perencanaan-pengadaan',
@@ -84,6 +105,38 @@ export const INITIAL_CATEGORIES: Category[] = [
     iconName: 'School',
     group: 'pilar',
   },
+  {
+    id: 'cat-fun-content',
+    name: 'Fun Content',
+    slug: 'fun-content',
+    description: 'Konten kreatif, interaktif, dan menghibur seputar dunia kerja ASN, serba-serbi kepegawaian, serta edukasi ringan yang dekat dengan keseharian aparatur.',
+    iconName: 'Smile',
+    group: 'pilar',
+  },
+  {
+    id: 'cat-greetings',
+    name: 'Greetings',
+    slug: 'greetings',
+    description: 'Ucapan resmi hari besar nasional, peringatan hari penting, serta apresiasi institusional dari Kedeputian Bidang SDM Aparatur.',
+    iconName: 'CalendarHeart',
+    group: 'pilar',
+  },
+  {
+    id: 'cat-quiz',
+    name: 'Quiz',
+    slug: 'quiz',
+    description: 'Kuis interaktif, tebak regulasi, dan tantangan pengetahuan seputar kebijakan manajemen ASN untuk menguji pemahaman publik.',
+    iconName: 'HelpCircle',
+    group: 'pilar',
+  },
+  {
+    id: 'cat-collab',
+    name: 'Collab',
+    slug: 'collab',
+    description: 'Konten kolaborasi lintas instansi pemerintah, kementerian/lembaga, serta pemangku kepentingan ekosistem SDM Aparatur.',
+    iconName: 'Handshake',
+    group: 'pilar',
+  },
 ];
 
 export const INITIAL_SOURCES: SourceDocument[] = [
@@ -144,7 +197,8 @@ export const INITIAL_SOURCES: SourceDocument[] = [
   },
 ];
 
-export const INITIAL_POLICIES: Policy[] = [];
+import { INITIAL_POLICIES } from './initialPolicies';
+export { INITIAL_POLICIES };
 
 export const SAMPLE_DOCUMENTS = [
   {

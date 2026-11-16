@@ -22,6 +22,11 @@ import {
   Flame,
   School,
   Landmark,
+  Smile,
+  CalendarHeart,
+  HelpCircle,
+  Handshake,
+  Megaphone,
 } from 'lucide-react';
 
 interface CategoryIconProps {
@@ -47,6 +52,16 @@ export const CategoryIcon: React.FC<CategoryIconProps> = ({ name, className = 'w
       return <School className={className} />;
     case 'Landmark':
       return <Landmark className={className} />;
+    case 'Smile':
+      return <Smile className={className} />;
+    case 'CalendarHeart':
+      return <CalendarHeart className={className} />;
+    case 'HelpCircle':
+      return <HelpCircle className={className} />;
+    case 'Handshake':
+      return <Handshake className={className} />;
+    case 'Megaphone':
+      return <Megaphone className={className} />;
     case 'Sparkles':
       return <Sparkles className={className} />;
     case 'Cpu':

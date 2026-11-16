@@ -1,7 +1,16 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { usePolicy } from '../context/PolicyContext';
 import { Policy } from '../types';
-import { InstagramEmbed, resolvePolicyReleaseDate } from '../components/common/InstagramEmbed';
+import { PolicyMediaFrame } from '../components/policy/PolicyMediaFrame';
+import { resolvePolicyMedia } from '../utils/imageUrlUtils';
+import {
+  INDONESIAN_MONTH_LABELS,
+  getPolicyDisplayDate,
+  getPolicyParsedDate,
+} from '../utils/dateUtils';
+import { getPolicyAboutDescription } from '../utils/policySummaryUtils';
+import { CategoryIcon } from '../components/common/CategoryIcon';
+import { STANDARD_KLASTER_IDS } from '../data/initialData';
 import {
   FeedLayoutSwitcher,
   FeedLayoutOption,
@@ -27,115 +36,8 @@ import { motion } from 'motion/react';
 
 type SortOrder = 'newest' | 'oldest' | 'title-asc' | 'title-desc';
 
-const INDONESIAN_MONTHS: Record<string, number> = {
-  januari: 0,
-  jan: 0,
-  februari: 1,
-  pebruari: 1,
-  feb: 1,
-  maret: 2,
-  mar: 2,
-  april: 3,
-  apr: 3,
-  mei: 4,
-  may: 4,
-  juni: 5,
-  jun: 5,
-  juli: 6,
-  jul: 6,
-  agustus: 7,
-  agu: 7,
-  ags: 7,
-  aug: 7,
-  september: 8,
-  sep: 8,
-  sept: 8,
-  oktober: 9,
-  okt: 9,
-  oct: 9,
-  november: 10,
-  nopember: 10,
-  nov: 10,
-  desember: 11,
-  des: 11,
-  dec: 11,
-};
-
-const INDONESIAN_MONTH_LABELS = [
-  'Januari',
-  'Februari',
-  'Maret',
-  'April',
-  'Mei',
-  'Juni',
-  'Juli',
-  'Agustus',
-  'September',
-  'Oktober',
-  'November',
-  'Desember',
-];
-
-function parseDateString(raw?: string): Date | null {
-  if (!raw || !raw.trim()) return null;
-  const cleaned = raw.trim().replace(/^[a-zA-ZÀ-ÿ]+,\s*/, '');
-
-  // Format: "18 Oktober 2024" or "5 Nov 2024"
-  const indoMatch = cleaned.match(/^(\d{1,2})\s+([a-zA-Z]+)\s+(\d{4})$/);
-  if (indoMatch) {
-    const day = Number(indoMatch[1]);
-    const monthIdx = INDONESIAN_MONTHS[indoMatch[2].toLowerCase()];
-    const year = Number(indoMatch[3]);
-    if (monthIdx !== undefined && day >= 1 && day <= 31) {
-      return new Date(year, monthIdx, day, 12, 0, 0, 0);
-    }
-  }
-
-  // Format: "YYYY-MM-DD"
-  const isoDayMatch = cleaned.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoDayMatch) {
-    return new Date(
-      Number(isoDayMatch[1]),
-      Number(isoDayMatch[2]) - 1,
-      Number(isoDayMatch[3]),
-      12,
-      0,
-      0,
-      0
-    );
-  }
-
-  // Format: "DD/MM/YYYY" or "DD-MM-YYYY"
-  const slashMatch = cleaned.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
-  if (slashMatch) {
-    return new Date(
-      Number(slashMatch[3]),
-      Number(slashMatch[2]) - 1,
-      Number(slashMatch[1]),
-      12,
-      0,
-      0,
-      0
-    );
-  }
-
-  const parsedTs = Date.parse(cleaned);
-  if (!Number.isNaN(parsedTs)) {
-    return new Date(parsedTs);
-  }
-
-  return null;
-}
-
 function getPolicyDate(policy: Policy): Date | null {
-  const resolved = resolvePolicyReleaseDate(policy);
-  return (
-    parseDateString(resolved !== '-' ? resolved : undefined) ||
-    parseDateString(policy.instagramDate) ||
-    parseDateString(policy.publicationDate) ||
-    parseDateString(policy.createdAt) ||
-    parseDateString(policy.updatedAt)
-  );
+  return getPolicyParsedDate(policy);
 }
 
 function toMonthKey(date: Date): string {
@@ -194,11 +96,24 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
     setCanScrollRight(scrollLeft + clientWidth < scrollWidth - 4);
   };
 
+  const klasterCategories = useMemo(
+    () =>
+      categories.filter(
+        (c) => c.group === 'klaster' || (!c.group && STANDARD_KLASTER_IDS.has(c.id))
+      ),
+    [categories]
+  );
+
+  const pilarCategories = useMemo(
+    () => categories.filter((c) => !klasterCategories.some((k) => k.id === c.id)),
+    [categories, klasterCategories]
+  );
+
   useEffect(() => {
     checkScrollability();
     window.addEventListener('resize', checkScrollability);
     return () => window.removeEventListener('resize', checkScrollability);
-  }, [categories]);
+  }, [klasterCategories]);
 
   const handleScroll = (direction: 'left' | 'right') => {
     const el = scrollContainerRef.current;
@@ -267,10 +182,12 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
     const keyword = searchFilter.trim().toLowerCase();
 
     return publishedPolicies.filter((p) => {
+      const aboutText = getPolicyAboutDescription(p).text;
       const matchesSearch =
         !keyword ||
         p.title.toLowerCase().includes(keyword) ||
-        p.summary.toLowerCase().includes(keyword);
+        p.summary.toLowerCase().includes(keyword) ||
+        aboutText.toLowerCase().includes(keyword);
 
       if (!matchesSearch) return false;
       if (monthFilter === 'all') return true;
@@ -365,7 +282,7 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
             Jelajahi Informasi SDM Aparatur
           </h1>
           <p className="text-sm sm:text-base text-slate-600 mt-3 max-w-2xl mx-auto leading-relaxed">
-            Temukan beragam konten edukasi kebijakan dan manajemen ASN berdasarkan 8 Klaster Manajemen ASN serta Pilar Konten Sekolah Kedinasan.
+            Temukan beragam konten edukasi kebijakan dan manajemen ASN berdasarkan 8 Klaster Manajemen ASN serta Pilar Konten Sekolah Kedinasan, Fun Content, Greetings, Quiz, dan Collab.
           </p>
         </div>
       </section>
@@ -500,91 +417,142 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
           </div>
 
           {/* Category / 8 Clusters Filter Buttons with Left/Right Navigation Arrows */}
-          <div className="relative flex items-center gap-2 pt-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={() => handleScroll('left')}
-              disabled={!canScrollLeft}
-              aria-label="Geser kategori ke kiri"
-              title="Geser ke kiri"
-              className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
-                canScrollLeft
-                  ? 'bg-white hover:bg-[#07529A] border-slate-200 hover:border-[#07529A] text-slate-700 hover:text-white shadow-2xs cursor-pointer'
-                  : 'bg-slate-50 border-slate-200/60 text-slate-300 cursor-not-allowed opacity-40'
-              }`}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-
-            <div
-              ref={scrollContainerRef}
-              onScroll={checkScrollability}
-              className="flex-1 flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none scroll-smooth"
-            >
+          <div className="space-y-3 pt-2 border-t border-slate-100">
+            <div className="relative flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setSelectedCategory('all')}
-                className={`relative px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 tabular-nums ${
-                  selectedCategory === 'all'
-                    ? 'text-white'
-                    : 'bg-slate-100/80 hover:bg-slate-200/70 text-slate-700'
+                onClick={() => handleScroll('left')}
+                disabled={!canScrollLeft}
+                aria-label="Geser klaster ke kiri"
+                title="Geser ke kiri"
+                className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                  canScrollLeft
+                    ? 'bg-white hover:bg-[#07529A] border-slate-200 hover:border-[#07529A] text-slate-700 hover:text-white shadow-2xs cursor-pointer'
+                    : 'bg-slate-50 border-slate-200/60 text-slate-300 cursor-not-allowed opacity-40'
                 }`}
               >
-                {selectedCategory === 'all' && (
-                  <motion.div
-                    layoutId="policyListActiveCluster"
-                    className="absolute inset-0 bg-[#07529A] rounded-xl shadow-2xs"
-                    transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                  />
-                )}
-                <span className="relative z-10">
-                  Semua Konten ({monthAndSearchMatched.length})
-                </span>
+                <ChevronLeft className="w-4 h-4" />
               </button>
 
-              {categories.map((cat) => {
-                const count = monthAndSearchMatched.filter((p) => p.categoryId === cat.id).length;
-                const isActive = selectedCategory === cat.id;
-                return (
-                  <button
-                    type="button"
-                    key={cat.id}
-                    onClick={() => setSelectedCategory(cat.id)}
-                    className={`relative px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 tabular-nums ${
-                      isActive
-                        ? 'text-white'
-                        : 'bg-slate-100/80 hover:bg-slate-200/70 text-slate-700'
-                    }`}
-                  >
-                    {isActive && (
-                      <motion.div
-                        layoutId="policyListActiveCluster"
-                        className="absolute inset-0 bg-[#07529A] rounded-xl shadow-2xs"
-                        transition={{ type: 'spring', stiffness: 420, damping: 32 }}
-                      />
-                    )}
-                    <span className="relative z-10">
-                      {cat.name} ({count})
-                    </span>
-                  </button>
-                );
-              })}
+              <div
+                ref={scrollContainerRef}
+                onScroll={checkScrollability}
+                className="flex-1 flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none scroll-smooth"
+              >
+                <button
+                  type="button"
+                  onClick={() => setSelectedCategory('all')}
+                  className={`relative px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 tabular-nums ${
+                    selectedCategory === 'all'
+                      ? 'text-white'
+                      : 'bg-slate-100/80 hover:bg-slate-200/70 text-slate-700'
+                  }`}
+                >
+                  {selectedCategory === 'all' && (
+                    <motion.div
+                      layoutId="policyListActiveCluster"
+                      className="absolute inset-0 bg-[#07529A] rounded-xl shadow-2xs"
+                      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                    />
+                  )}
+                  <span className="relative z-10">
+                    Semua Konten ({monthAndSearchMatched.length})
+                  </span>
+                </button>
+
+                {klasterCategories.map((cat) => {
+                  const count = monthAndSearchMatched.filter((p) => p.categoryId === cat.id).length;
+                  const isActive = selectedCategory === cat.id;
+                  return (
+                    <button
+                      type="button"
+                      key={cat.id}
+                      onClick={() => setSelectedCategory(isActive ? 'all' : cat.id)}
+                      className={`relative px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 tabular-nums ${
+                        isActive
+                          ? 'text-white'
+                          : 'bg-slate-100/80 hover:bg-slate-200/70 text-slate-700'
+                      }`}
+                    >
+                      {isActive && (
+                        <motion.div
+                          layoutId="policyListActiveCluster"
+                          className="absolute inset-0 bg-[#07529A] rounded-xl shadow-2xs"
+                          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                        />
+                      )}
+                      <span className="relative z-10">
+                        {cat.name} ({count})
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => handleScroll('right')}
+                disabled={!canScrollRight}
+                aria-label="Geser klaster ke kanan"
+                title="Geser ke kanan"
+                className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
+                  canScrollRight
+                    ? 'bg-white hover:bg-[#07529A] border-slate-200 hover:border-[#07529A] text-slate-700 hover:text-white shadow-2xs cursor-pointer'
+                    : 'bg-slate-50 border-slate-200/60 text-slate-300 cursor-not-allowed opacity-40'
+                }`}
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => handleScroll('right')}
-              disabled={!canScrollRight}
-              aria-label="Geser kategori ke kanan"
-              title="Geser ke kanan"
-              className={`w-8 h-8 rounded-xl border flex items-center justify-center shrink-0 transition-all ${
-                canScrollRight
-                  ? 'bg-white hover:bg-[#07529A] border-slate-200 hover:border-[#07529A] text-slate-700 hover:text-white shadow-2xs cursor-pointer'
-                  : 'bg-slate-50 border-slate-200/60 text-slate-300 cursor-not-allowed opacity-40'
-              }`}
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
+            {/* Dedicated Pilar Konten Bar (Sekolah Kedinasan, Fun Content, etc.) */}
+            {pilarCategories.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-100">
+                <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">
+                  Pilar Konten:
+                </span>
+                {pilarCategories.map((cat) => {
+                  const count = monthAndSearchMatched.filter((p) => p.categoryId === cat.id).length;
+                  const isActive = selectedCategory === cat.id;
+                  return (
+                    <button
+                      type="button"
+                      key={cat.id}
+                      onClick={() => setSelectedCategory(isActive ? 'all' : cat.id)}
+                      className={`relative inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer shrink-0 tabular-nums border ${
+                        isActive
+                          ? 'text-white border-[#07529A]'
+                          : 'bg-amber-50/60 hover:bg-amber-100/70 text-slate-800 border-amber-200/80'
+                      }`}
+                    >
+                      {isActive && (
+                        <motion.div
+                          layoutId="policyListActiveCluster"
+                          className="absolute inset-0 bg-[#07529A] rounded-xl shadow-2xs"
+                          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                        />
+                      )}
+                      <span className="relative z-10 inline-flex items-center gap-1.5">
+                        <CategoryIcon
+                          name={cat.iconName}
+                          className={`w-3.5 h-3.5 shrink-0 ${
+                            isActive ? 'text-[#FFD84D]' : 'text-[#07529A]'
+                          }`}
+                        />
+                        <span>{cat.name}</span>
+                        <span
+                          className={`text-[11px] ${
+                            isActive ? 'text-blue-100' : 'text-slate-500'
+                          }`}
+                        >
+                          ({count})
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
 
@@ -601,6 +569,11 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
                     ? 'Semua Feed Konten Instagram'
                     : `Feed Konten: ${selectedClusterObj?.name || 'Klaster ASN'}`}
                 </h2>
+                {selectedClusterObj?.group === 'pilar' && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200/80 text-[11px] font-bold">
+                    Pilar Konten
+                  </span>
+                )}
                 {activeMonthBadgeLabel && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-blue-50 text-[#07529A] border border-blue-200/80 text-[11px] font-semibold">
                     <Calendar className="w-3 h-3" />
@@ -638,6 +611,7 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
           <div className={getFeedGridClass(feedLayout)}>
             {filtered.map((policy) => {
               const cluster = getCategoryById(policy.categoryId);
+              const media = resolvePolicyMedia(policy);
               return (
                 <div
                   key={policy.id}
@@ -653,7 +627,7 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
                           {cluster?.name || 'SDM Aparatur'}
                         </span>
                         <span>·</span>
-                        <span className="shrink-0">{resolvePolicyReleaseDate(policy)}</span>
+                        <span className="shrink-0">{getPolicyDisplayDate(policy)}</span>
                       </div>
                       <h3 className="font-bold text-slate-900 text-sm sm:text-base leading-snug line-clamp-2">
                         {policy.title}
@@ -665,30 +639,34 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
                     </span>
                   </div>
 
-                  {/* Official Instagram Embed */}
-                  <div className="w-full flex justify-center py-1 sm:py-2 bg-slate-50/70 rounded-2xl border border-slate-100 overflow-hidden">
-                    <InstagramEmbed
-                      url={policy.instagramPostUrl}
-                      thumbnail={policy.thumbnail}
-                      clusterName={cluster?.name}
-                      title={policy.title}
-                      hideHeader={true}
-                      captioned={false}
-                    />
-                  </div>
+                  {/* Visual Media: Direct Image URL or Official Instagram Embed */}
+                  <PolicyMediaFrame
+                    policy={policy}
+                    clusterName={cluster?.name}
+                    variant="card"
+                    onOpenDetail={() => navigateTo({ name: 'policy-detail', slug: policy.slug })}
+                  />
 
                   {/* Actions */}
                   <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs">
-                    <a
-                      href={policy.instagramPostUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 text-slate-700 hover:text-[#07529A] font-semibold transition-colors whitespace-nowrap"
-                    >
-                      <Instagram className="w-3.5 h-3.5 text-[#E1306C] shrink-0" />
-                      <span>Buka di Instagram</span>
-                      <ExternalLink className="w-3 h-3 text-slate-400 shrink-0" />
-                    </a>
+                    {media.externalSourceUrl ? (
+                      <a
+                        href={media.externalSourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-slate-700 hover:text-[#07529A] font-semibold transition-colors whitespace-nowrap"
+                      >
+                        <Instagram className="w-3.5 h-3.5 text-[#E1306C] shrink-0" />
+                        <span>
+                          {media.isInstagramSource ? 'Buka di Instagram' : 'Buka Sumber Konten'}
+                        </span>
+                        <ExternalLink className="w-3 h-3 text-slate-400 shrink-0" />
+                      </a>
+                    ) : (
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        Publikasi KOMPAK SDMA
+                      </span>
+                    )}
 
                     <motion.button
                       type="button"
@@ -697,7 +675,7 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
                       onClick={() => navigateTo({ name: 'policy-detail', slug: policy.slug })}
                       className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-[#07529A] hover:bg-[#053d73] text-white rounded-xl font-bold shadow-2xs transition-colors cursor-pointer whitespace-nowrap shrink-0"
                     >
-                      <span>Buka Halaman Detail</span>
+                      <span>Lihat Selengkapnya</span>
                       <ArrowRight className="w-3.5 h-3.5" />
                     </motion.button>
                   </div>
@@ -716,7 +694,7 @@ export const PolicyListPage: React.FC<PolicyListPageProps> = ({ initialCategoryF
             <p className="text-xs sm:text-sm text-slate-500 leading-relaxed">
               {monthFilter !== 'all'
                 ? 'Belum ada postingan pada periode bulan yang dipilih. Silakan pilih bulan lain atau tampilkan semua bulan.'
-                : 'Tidak ada konten yang sesuai dengan kriteria penyaringan Anda. Silakan coba pilih klaster lain atau bersihkan kata kunci.'}
+                : 'Tidak ada konten yang sesuai dengan kriteria penyaringan Anda. Silakan coba pilih klaster atau pilar konten lain, atau bersihkan kata kunci.'}
             </p>
             <button
               type="button"
